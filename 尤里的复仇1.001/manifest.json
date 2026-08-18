@@ -1,0 +1,256 @@
+{
+  "schema_version": 1,
+  "sample": {
+    "description": "RA2 1.006 + Yuri's Revenge 1.001 third-party integrated distribution; official map additions; cnc-ddraw; no-cutscene variant",
+    "cutscenes": "intentionally omitted in this variant",
+    "stock_gold_master": false
+  },
+  "core_root_files": [
+    {
+      "name": "ra2.mix",
+      "classification": "core",
+      "size": 281888480,
+      "sha256": "896a8b64f9f1bb8ad5e0bc64fc0b8ea8c84112494761ea1a43478d10c5ef9914"
+    },
+    {
+      "name": "ra2md.mix",
+      "classification": "core",
+      "size": 204527696,
+      "sha256": "69d886defad9114dd440a013b364c8c004e369b5221d1889957b49d00058559d"
+    },
+    {
+      "name": "expandmd01.mix",
+      "classification": "official_patch",
+      "size": 4813968,
+      "sha256": "0c0a64e741bdecdc3843a0beb6bb1f58aa2df5b86eb3bc4a953821ec98f3d6ec"
+    },
+    {
+      "name": "language.mix",
+      "classification": "core",
+      "size": 52913656,
+      "sha256": "870c3bcc596e8690c55077a4c651f88d0dbc35f2a786c6c4891df8ffdb9ce192"
+    },
+    {
+      "name": "langmd.mix",
+      "classification": "core",
+      "size": 84643206,
+      "sha256": "0290bc3e40c38406e2ec6805dc18ef6c3a9b6feee6db42df717ac920e93294c8"
+    },
+    {
+      "name": "MULTIMD.MIX",
+      "classification": "core_maps",
+      "size": 31264268,
+      "sha256": "ff4138ba95f7efd8bded14342fc9082b99c47e43c25ab18236e4eea141b488e9"
+    },
+    {
+      "name": "MAPSMD03.MIX",
+      "classification": "official_addon",
+      "size": 4419780,
+      "sha256": "6c36a0af05e2e9f86967308c77cf90fae9976d920e320aad8b9e4aa2e99e86a3"
+    },
+    {
+      "name": "movmd03.mix",
+      "classification": "cutscene_placeholder",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "official_addon_maps": [
+    {
+      "name": "CrctBrd.yro",
+      "size": 188536,
+      "sha256": "039eb0a5f40aaf33ab3b308123b84ed277456a2846e9f527d8de32eb5728a58f",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "DeepFrze.yro",
+      "size": 239496,
+      "sha256": "1904d7337ed2eae8ac321e2b31fbbe6b7e3117dd8c99c3c911dbed09931f8b8a",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "HighExpR.yro",
+      "size": 120088,
+      "sha256": "7e91a094d647047bed7bc7c7b1795afb3679de48a3566c915c28611ca52c99de",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "Ice_Age.yro",
+      "size": 243352,
+      "sha256": "2405488285323f671fbf3da2c706f803b08fa721c8e147c65baa04388faf31cc",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "IrvineCa.yro",
+      "size": 218792,
+      "sha256": "086def8929b6e65e9e13704e908de189bb189c1bd9bb27d3b99e2f3ad2867767",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "IsleLand.yro",
+      "size": 162216,
+      "sha256": "426c969e7dda4ff26d533a5ae4c36df20af2479b6146f500ca2c8275c3a5ff85",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "MojoSprt.yro",
+      "size": 131448,
+      "sha256": "85478c26eeeda91a413fa913a792b0b313f1a09c67a18adb1b8877aaccf2784b",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "MonsterM.yro",
+      "size": 134008,
+      "sha256": "c52d5bde53596b5c22e19bbfc1723aa7dff9a4390c05d7c4d8ff39196bbb1ef9",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "MoonPatr.yro",
+      "size": 103576,
+      "sha256": "580a1d2e9c941189c36ba03ee61ac51c82e7616594762e8c3b77e5e19a9a8580",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "RiverRam.yro",
+      "size": 74136,
+      "sha256": "d28f18e16e37a80e30d12bbb3a24f01232cb1d3b2c81109ea104c1c0d061c3a1",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "SinkSwim.yro",
+      "size": 84840,
+      "sha256": "655f191407664745d5829b59b34baddcfd287fcd0bbfd9b1e38c03c901571daf",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "Transylv.yro",
+      "size": 150264,
+      "sha256": "b4b84f67b389f076f9f4a54105c56410492f1a1c82fbf2444e734ec8b968d02f",
+      "set": "Official YR Map Pack #5 cumulative"
+    },
+    {
+      "name": "Unrepent.yro",
+      "size": 187192,
+      "sha256": "68becb67e757042817247af8a00e43ca67826611f09b5e1ce9b247b32b8a1183",
+      "set": "Official YR Map Pack #5 cumulative"
+    }
+  ],
+  "third_party_or_modified": [
+    {
+      "name": "ddraw.dll",
+      "classification": "cnc-ddraw",
+      "size": 359424,
+      "sha256": "344e921f35a5b103d6d95fde01f0e8762f3aad94eb7ba3f6978d4d10b1071a0a"
+    },
+    {
+      "name": "ddraw.ini",
+      "classification": "cnc-ddraw config",
+      "size": 17018,
+      "sha256": "86456b50acb424ee0c316182e74c1fc6552d693621a5f615132069a8682453fd"
+    },
+    {
+      "name": "cnc-ddraw config.exe",
+      "classification": "cnc-ddraw config tool",
+      "size": 4622336,
+      "sha256": "ac706afd1807feafca1ae2ceca718013db5148e66e0c2328879aa6ec3b0b9fc2"
+    },
+    {
+      "name": "game.fnt",
+      "classification": "distribution-added simplified Chinese font",
+      "size": 1792690,
+      "sha256": "9d7a6d5435b3f32973b7ec3913468ecb12d9cec2eb081122083033e417a12d92"
+    },
+    {
+      "name": "RA2MD.INI",
+      "classification": "modified runtime/user config",
+      "size": 1711,
+      "sha256": "989bc94cec7f3cceda00ed58871fce17ec4e35fd13e3dc62f576b3b2cd251204"
+    },
+    {
+      "name": "Sn_Changer.bat",
+      "classification": "serial changer",
+      "size": 737,
+      "sha256": "dd688bd3096fd21bec6de8f4f6a83c29e95b1b89906fe93db8b0397432d3a863"
+    },
+    {
+      "name": "SetupReg.exe",
+      "classification": "MYTH/DYNASTY registry setup",
+      "size": 13088,
+      "sha256": "53966ef28525e29fa69f422187aa90dece8198557182cadc9a0170c7be4cca76"
+    },
+    {
+      "name": "YURI.EXE",
+      "classification": "MYTH/DEViANCE-associated launcher",
+      "size": 977633,
+      "sha256": "6b597354a1433bda067737319a3be2221b9004b4cba3c5b34f79de641be0c4a6"
+    }
+  ],
+  "verified_nested_mix": {
+    "ra2.mix": {
+      "cache.mix": 196632,
+      "local.mix": 34793784,
+      "conquer.mix": 16284016,
+      "generic.mix": 15810386,
+      "isogen.mix": 11992046,
+      "isotemp.mix": 29171410,
+      "isosnow.mix": 28758698,
+      "isourb.mix": 31811402,
+      "tem.mix": 10850,
+      "sno.mix": 10898,
+      "urb.mix": 10850,
+      "temperat.mix": 2728266,
+      "snow.mix": 18421274,
+      "urban.mix": 2726218,
+      "load.mix": 25478184,
+      "neutral.mix": 45571600,
+      "sidec01.mix": 2099412,
+      "sidec02.mix": 2102564
+    },
+    "ra2md.mix": {
+      "cachemd.mix": 10424,
+      "localmd.mix": 4819480,
+      "conqmd.mix": 6226784,
+      "genermd.mix": 12567594,
+      "isogenmd.mix": 6637126,
+      "isotemmd.mix": 5053802,
+      "isosnomd.mix": 8662870,
+      "isourbmd.mix": 5198826,
+      "des.mix": 12946,
+      "isodes.mix": 35742754,
+      "isodesmd.mix": 1929046,
+      "ubn.mix": 12946,
+      "isoubn.mix": 32364926,
+      "isoubnmd.mix": 9632338,
+      "lun.mix": 12946,
+      "isolun.mix": 23541462,
+      "isolunmd.mix": 3408654,
+      "snowmd.mix": 12552046,
+      "loadmd.mix": 13080744,
+      "sidec02md.mix": 1823972
+    },
+    "language.mix": {
+      "cameo.mix": 608120
+    },
+    "langmd.mix": {
+      "cameomd.mix": 204792,
+      "ra2md.csf": 332973
+    }
+  },
+  "effective_yr1001_patch_ini": {
+    "rulesmd.ini": {
+      "source": "expandmd01.mix",
+      "size": 743215,
+      "sha256": "3d341ef8a13a4b5ab24af2eef48ac94931ac2bb87d950fe3330a07e2d25672ef"
+    },
+    "soundmd.ini": {
+      "source": "expandmd01.mix",
+      "size": 99392,
+      "sha256": "0a8e85381aef1a0f97074c953bfe99504da00c6220fae1a023a1afd857023232"
+    }
+  },
+  "observations": {
+    "udp_patch_wsock32_dll_present": false,
+    "movmd03_zero_bytes_expected_for_this_variant": true,
+    "mix_openable_with_xcc_mixer": true
+  }
+}
