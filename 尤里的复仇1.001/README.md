@@ -6,22 +6,28 @@
 
 > 重要：当前样本是维护者明确说明的“无过场动画版”。因此 `movmd03.mix` 为 0 字节是该发行包的主动裁剪，不作为文件损坏证据。
 
-## 1. 为什么仓库不直接提交完整 MIX
+## 1. Git LFS Compatibility Corpus
 
-当前源码仓库不直接 vendor 完整原版游戏资产，原因有两层：
+本仓库改为使用 **Git LFS** 保存大型 RA2/YR 兼容性测试资源，而不是因为普通 Git 的 100 MiB 单文件限制而只保存索引。
 
-1. `ra2.mix`（281,888,480 B）与 `ra2md.mix`（204,527,696 B）均超过 GitHub 普通 Git 单文件 100 MiB 硬限制；
-2. 原版游戏数据是否适合公开再分发，与引擎是否需要读取这些数据是两个问题。项目的 `DEVELOPERS.md` 已要求把这两件事分开处理。
+当前冻结的导入结构为：
 
-因此这里保存：
+- 7 个 canonical top-level MIX：`ra2.mix`、`ra2md.mix`、`expandmd01.mix`、`language.mix`、`langmd.mix`、`MULTIMD.MIX`、`MAPSMD03.MIX`；
+- 48 个单独保存的 nested MIX；
+- 56 个高价值 INI；
+- 2 个 CSF；
+- 13 个官方 `.yro` 地图；
+- `corpus-manifest.json` 与 `CORPUS-SHA256SUMS.txt`。
 
-- 经过实测的文件身份与分类；
-- SHA-256；
-- MIX / nested MIX 的有效资源路径；
-- YR 1.001 的 INI 覆盖关系；
-- 对 P0/P1/P2 等阶段真正有价值的资源容器清单。
+当前样本经过本地构建验证后，共计 **126 个资源文件、1,269,875,373 B（约 1.183 GiB）**。
 
-实际兼容性测试应由维护者在本地提供合法游戏文件，并按 `DEVELOPERS.md` 的 Compatibility Corpus 约定挂载。
+TMP、PAL、SHP、VXL、HVA 等大量 leaf asset 不再从 nested MIX 全量重复复制一份。它们的原始完整字节已经由相应 nested MIX 保存；这样既满足兼容性测试，又避免把同一批资源重复占用数倍 LFS 空间和下载带宽。需要独立 leaf asset 的具体测试可以按需提取，根 `.gitattributes` 已为这些二进制扩展名预设 LFS 规则。
+
+详细结构、完整 nested MIX 列表、导入命令和 fresh-clone 验收见：
+
+[`LFS语料导入.md`](./LFS语料导入.md)
+
+> 状态门禁：GitHub 页面上出现 LFS pointer **不等于资源上传成功**。只有从 fresh clone 执行 `git lfs pull` 后能恢复真实文件大小，并且全部 SHA-256 通过，才允许把 corpus 状态标为 COMPLETE。
 
 ## 2. 本次最重要的结论
 
@@ -32,8 +38,8 @@
 | `ra2.mix` | RA2 主资源容器 | 内含 `local.mix`、`conquer.mix`、地形/剧院 MIX 等；YR 会继承大量 RA2 内容 |
 | `ra2md.mix` | YR 主资源容器 | 内含 `localmd.mix`、`conqmd.mix`、YR 新增地形/剧院资源等 |
 | `expandmd01.mix` | YR 1.001 官方补丁资源容器 | **1.001 实际使用的 `rulesmd.ini`、`soundmd.ini` 位于这里** |
-| `language.mix` | RA2 本地化/文本/图标资源容器 | 含 `cameo.mix` 等 |
-| `langmd.mix` | YR 本地化/文本/图标资源容器 | 已验证含 `cameomd.mix`、`ra2md.csf` |
+| `language.mix` | RA2 本地化/文本/图标资源容器 | 含 `audio.mix`、`cameo.mix`、`ra2.csf` 等 |
+| `langmd.mix` | YR 本地化/文本/图标资源容器 | 已验证含 `audiomd.mix`、`cameomd.mix`、`ra2md.csf` |
 | `MULTIMD.MIX` | YR 多人地图容器 | MAP 兼容性语料 |
 | `MAPSMD03.MIX` | 官方地图增补相关 MIX | 属官方增补，不等同于基础光盘 1.001 |
 | `*.yro`（13 个） | Westwood/EA 官方 YR Map Pack #5 cumulative | 属官方后续地图增补，不等同于基础光盘 1.001 |
@@ -49,11 +55,11 @@
 | `Shaders/` | `cnc-ddraw` 的 GLSL/upscaling shader | 可作图像缩放效果参考，不是 RA2YR 原版素材 |
 | `game.fnt` | 发行包额外加入的简体中文字体 | 发布者自己声明为附加特性；不是纯净原版基线 |
 | `Sn_Changer.bat` | 随机生成序列号并写入注册表 | 安装/联机辅助脚本，不是游戏内容格式语料 |
-| `SetupReg.exe` | `MYTH/DYNASTY` Registry Setup | 第三方破解/注册辅助，不作为原版基线 |
+| `SetupReg.exe` | `MYTH/DYNASTY` Registry Setup | 第三方注册辅助，不作为原版基线 |
 | `YURI.EXE` | 文件内明确含 `MYTH/DEViANCE` 字符串 | 不是可信的纯原版可执行文件基线 |
 | `RA2MD.INI` | 当前用户配置/发行包修改配置 | 含高分辨率与兼容配置，不能作为“原厂默认 INI” |
 
-`gamemd.exe` 的 PE 元数据仍标识为 Westwood Yuri's Revenge 主程序，且本样本 MD5 为 `fe2301a1f48841aa084aade100b25335`；它可以在后续黑盒行为研究中使用，但 **二进制行为参考** 与 **可公开提交的内容语料** 要分开管理。
+`gamemd.exe` 的 PE 元数据仍标识为 Westwood Yuri's Revenge 主程序，且本样本 MD5 为 `fe2301a1f48841aa084aade100b25335`；它可以在后续黑盒行为研究中使用，但 **二进制行为参考** 与 **内容兼容性语料** 要分开管理。
 
 ## 3. 发布者宣传项与当前实际文件的对应
 
@@ -126,6 +132,8 @@ XCC Mixer 可以打开这些 MIX；本项目也不应依赖 XCC 才能运行。
 - `ra2.mix`：encrypted + checksum；
 - `ra2md.mix`：encrypted + checksum；
 - `expandmd01.mix`：encrypted + checksum；
+- `ra2.mix` 的 21 个顶层索引条目已全部识别；
+- `ra2md.mix` 的 25 个顶层索引条目已全部识别；
 - 可从父 MIX 中正确定位并提取 nested MIX；
 - 可从 `expandmd01.mix` 定位 YR 1.001 的 `rulesmd.ini` 与 `soundmd.ini`。
 
@@ -133,10 +141,13 @@ Westwood MIX 不保存完整文件名，而保存文件名哈希、偏移和长�
 
 ## 5. 进一步索引
 
+- [`LFS语料导入.md`](./LFS语料导入.md) —— Git LFS corpus 目录、完整 nested MIX 清单、导入与 fresh-clone 验收。
 - [`MIX与INI资源索引.md`](./MIX与INI资源索引.md) —— 直接面向 P0/P1/P2 的资源路径与 INI 覆盖关系。
 - [`发行包文件审计.md`](./发行包文件审计.md) —— 当前发行包逐类归属。
-- [`SHA256SUMS.txt`](./SHA256SUMS.txt) —— 当前样本关键文件哈希，防止以后把不同 repack 混为同一黄金语料。
-- [`manifest.json`](./manifest.json) —— 给工具/AI Agent 使用的机器可读摘要。
+- [`SHA256SUMS.txt`](./SHA256SUMS.txt) —— 当前样本关键顶层文件哈希，防止以后把不同 repack 混为同一黄金语料。
+- [`manifest.json`](./manifest.json) —— 本次发行包审计的机器可读摘要。
+- `corpus/corpus-manifest.json` —— LFS corpus 完整机器可读 manifest（导入后生成）。
+- `corpus/CORPUS-SHA256SUMS.txt` —— LFS corpus 全量 SHA-256（导入后生成）。
 
 ## 6. 参考资料
 
