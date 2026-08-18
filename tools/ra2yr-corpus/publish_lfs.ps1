@@ -57,7 +57,13 @@ Assert-LastExitCode "git switch main"
 git pull --ff-only origin main
 Assert-LastExitCode "git pull --ff-only origin main"
 
-if ((git branch --list $Branch).Trim()) {
+# `git branch --list` intentionally emits no output when the branch does not
+# exist. Windows PowerShell represents that as $null, so calling .Trim() on the
+# command result throws InvokeMethodOnNull. Materialize the result as an array
+# and check Count instead.
+$ExistingBranch = @(git branch --list $Branch)
+Assert-LastExitCode "git branch --list corpus branch"
+if ($ExistingBranch.Count -gt 0) {
     git branch -D $Branch
     Assert-LastExitCode "delete existing local corpus branch"
 }
