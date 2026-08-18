@@ -1,0 +1,61 @@
+
+_Amb_BirdsPark ;公园鸟
+_Amb_BirdsBeach ;海滩鸟类
+_Amb_BirdsHarbor ;鸟 港口
+_Amb_BirdsJungle1 ;丛林鸟类
+_Amb_BirdsJungle2
+_Amb_BirdsMorning ;早鸟
+_Amb_BirdsTemperate1 ;温带鸟类
+_Amb_BirdsTemperate2
+_Amb_BirdsNightOwl ;夜猫子（猫头鹰）
+_Amb_CricketBed  ;蟋蟀
+_Amb_CricketChirps ;蟋蟀叽叽喳喳声
+
+_Amb_UrbanMurmur1 ;城市杂音
+_Amb_UrbanMurmur2
+_Amb_Traffic ;交通
+
+_Amb_WindCold ;冷风
+_Amb_WindPlains ;风平原
+
+_Amb_River ;河流
+_Amb_WavesLake ;湖
+_Amb_OceanLight ;海洋
+_Amb_OceanHeavy ;海洋重浪
+
+
+
+不完整 自行添加
+
+
+
+
+
+
+
+
+ OilDerrickLoop ;油井工作声音
+ WaterfallLoop ;瀑布
+ WeatherIntro ；闪电风暴 雷鸣
+ WeatherStrike ；闪电风暴 霹雳
+ SpyPlaneSnapshot ；间谍机拍照
+ BridgeRepaired ；桥被修复
+ Cheer ；欢呼
+ RadarOn ；雷达连线
+ RadarOff ；雷达中断
+ CratePromoted ；升1星
+ CrateMoney ； 金钱箱
+ CrateReveal ；全球
+ CrateFirePower ；火力
+ CrateArmor ；空箱 护甲
+ CrateSpeed ；加速度
+ CrateFreeUnit ；单位箱
+ GenLargeWaterDie ；单位沉海
+ ExplosionWaterLarge ；炮弹落水
+ CrazyIvanBombTick ；炸弹滴答滴答
+ Dummy ；闸门开关
+ NavalUnitEmerge ；隐身显现
+
+
+
+

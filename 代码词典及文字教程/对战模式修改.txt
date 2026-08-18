@@ -1,0 +1,5 @@
+自己写个配置文件，比如fuckea.ini(格式同rules),其中同注册名下的代码设定会覆盖rules里的设定。
+在mpmodesmd.ini里注册
+如果不懂怎么注册怎么写的话
+就把原版的mpmodesmd.ini提出来，参照原版的格式写。
+fuckea.ini里的相同内容会覆盖rulesmd.ini里的内容
