@@ -6,10 +6,17 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$env:PYTHONUTF8 = "1"
 
 function Require-Command([string]$Name) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
         throw "Required command not found: $Name"
+    }
+}
+
+function Assert-LastExitCode([string]$Step) {
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Step failed with exit code $LASTEXITCODE"
     }
 }
 
@@ -18,17 +25,23 @@ Require-Command py
 
 try {
     git lfs version | Out-Null
+    Assert-LastExitCode "git lfs version"
 } catch {
-    throw "Git LFS is not installed. Install Git LFS first, then rerun this script."
+    throw "Git LFS is not installed or not available. Install Git LFS first, then rerun this script."
 }
 
-$RepoRoot = (git rev-parse --show-toplevel).Trim()
-if (-not $RepoRoot) {
-    throw "Run this script inside the RA2YR-bycpp git repository."
+# Do not obtain the repository path from `git rev-parse` here. Windows PowerShell
+# 5.1 can decode UTF-8 native-process output using the active legacy code page,
+# which corrupts non-ASCII paths. Resolve from this script's own filesystem path
+# instead; PowerShell/.NET already holds PSScriptRoot as a Unicode string.
+$RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot ".git"))) {
+    throw "Could not resolve the RA2YR-bycpp repository root from the script location: $RepoRoot"
 }
-Set-Location $RepoRoot
+Set-Location -LiteralPath $RepoRoot
 
 $Remote = (git remote get-url origin).Trim()
+Assert-LastExitCode "git remote get-url origin"
 if ($Remote -notmatch "ShrinkShi/RA2YR-bycpp") {
     throw "Unexpected origin remote: $Remote"
 }
@@ -38,54 +51,56 @@ if ((git status --porcelain)) {
 }
 
 git fetch origin main
+Assert-LastExitCode "git fetch origin main"
 git switch main
+Assert-LastExitCode "git switch main"
 git pull --ff-only origin main
+Assert-LastExitCode "git pull --ff-only origin main"
 
 if ((git branch --list $Branch).Trim()) {
     git branch -D $Branch
+    Assert-LastExitCode "delete existing local corpus branch"
 }
 git switch -c $Branch
+Assert-LastExitCode "create corpus branch"
 
 git lfs install --local
+Assert-LastExitCode "git lfs install --local"
 
-$Builder = Join-Path $RepoRoot "tools/ra2yr-corpus/build_corpus.py"
+$Builder = Join-Path $PSScriptRoot "build_corpus.py"
 py $Builder --source $SourceDir --repo-root $RepoRoot
+Assert-LastExitCode "build corpus"
 
-git add .gitattributes
-git add "尤里的复仇1.001/corpus"
+# The working tree was required to be clean before generation, so staging all
+# generated changes is safer than embedding a non-ASCII repository path in this
+# Windows PowerShell 5.1 script.
+git add -A
+Assert-LastExitCode "git add -A"
 
-$BinaryPatterns = @(
-    "尤里的复仇1.001/corpus/**/*.mix",
-    "尤里的复仇1.001/corpus/**/*.MIX",
-    "尤里的复仇1.001/corpus/**/*.yro",
-    "尤里的复仇1.001/corpus/**/*.map",
-    "尤里的复仇1.001/corpus/**/*.shp",
-    "尤里的复仇1.001/corpus/**/*.vxl",
-    "尤里的复仇1.001/corpus/**/*.hva",
-    "尤里的复仇1.001/corpus/**/*.tmp",
-    "尤里的复仇1.001/corpus/**/*.pal",
-    "尤里的复仇1.001/corpus/**/*.csf"
-)
-
-$TrackedBinaryFiles = foreach ($Pattern in $BinaryPatterns) {
-    git ls-files $Pattern
+$ManifestFile = Get-ChildItem -LiteralPath $RepoRoot -Recurse -File -Filter "corpus-manifest.json" | Select-Object -First 1
+if (-not $ManifestFile) {
+    throw "corpus-manifest.json was not generated"
 }
+$Manifest = Get-Content -LiteralPath $ManifestFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
 
-$NonLfs = foreach ($Path in $TrackedBinaryFiles) {
-    $Attr = git check-attr filter -- $Path
-    if ($Attr -notmatch "filter: lfs$") {
-        $Path
+$LfsExtensions = @(".mix", ".yro", ".map", ".shp", ".vxl", ".hva", ".tmp", ".pal", ".csf")
+$ExpectedLfsCount = @(
+    $Manifest.entries | Where-Object {
+        $LfsExtensions -contains [System.IO.Path]::GetExtension([string]$_.path).ToLowerInvariant()
     }
-}
-if ($NonLfs) {
-    throw "Some corpus binary files are not tracked by Git LFS:`n$($NonLfs -join "`n")"
+).Count
+$ActualLfsFiles = @(git lfs ls-files --name-only)
+Assert-LastExitCode "git lfs ls-files"
+
+if ($ActualLfsFiles.Count -ne $ExpectedLfsCount) {
+    throw "Git LFS coverage mismatch: manifest expects $ExpectedLfsCount LFS-managed files, but git lfs ls-files reports $($ActualLfsFiles.Count)."
 }
 
 Write-Host "----- git lfs status -----"
 git lfs status
+Assert-LastExitCode "git lfs status"
 
-$Manifest = Get-Content "尤里的复仇1.001/corpus/corpus-manifest.json" -Raw | ConvertFrom-Json
-Write-Host ("Entries: {0}; payload: {1:N3} GiB" -f $Manifest.entryCount, ($Manifest.totalBytes / 1GB))
+Write-Host ("Entries: {0}; payload: {1:N3} GiB; LFS files: {2}" -f $Manifest.entryCount, ($Manifest.totalBytes / 1GB), $ActualLfsFiles.Count)
 
 if ($Manifest.entryCount -ne 126) {
     throw "Unexpected corpus entry count: $($Manifest.entryCount); expected 126 for the audited sample."
@@ -95,9 +110,11 @@ if ($Manifest.totalBytes -ne 1269875373) {
 }
 
 git commit -m "assets: add RA2YR 1.001 compatibility corpus via Git LFS"
+Assert-LastExitCode "git commit corpus"
 
 # Git LFS uploads binary objects before Git updates the remote branch ref.
 git push -u origin $Branch
+Assert-LastExitCode "git push corpus branch"
 
 Write-Host "Corpus branch pushed: $Branch"
 Write-Host "Verify a fresh clone can materialize all LFS objects before merging into main."
