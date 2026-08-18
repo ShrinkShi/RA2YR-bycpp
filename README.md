@@ -1,329 +1,199 @@
 # RA2YR-bycpp
 
-一个使用 **C++23** 开发的、面向 **Red Alert 2: Yuri's Revenge** 数据兼容的现代 RTS 游戏引擎 / runtime loader 项目。
+`RA2YR-bycpp` 是一个使用 **C++23** 开发的 Red Alert 2: Yuri's Revenge（RA2YR / YR）兼容 RTS 游戏引擎 / Runtime Loader 项目。
 
-本项目的长期目标不是“做一个看起来像红警2的 RTS”，而是尽可能做到：
+项目的长期目标不是“做一个看起来像红警2的 RTS”，而是尽可能做到：
 
-> `gamemd.exe` 能识别和运行的传统 RA2YR 数据与 MOD 内容，本引擎也能够直接识别、解析和运行。
+> **`gamemd.exe` 能识别和运行的传统 RA2YR 数据与 MOD 内容，本引擎也能够直接识别、解析和运行。**
 
-也就是说，传统资源应尽量保持原样：
-
-- MIX
-- INI / Rules / Art / Sound / AI
-- MAP
-- SHP
-- VXL
-- HVA
-- TMP
-- PAL
-- WAV / AUD
-- CSF
-- PCX
-- IsoMapPack5 / OverlayPack / OverlayDataPack / PreviewPack
-- 后续经研究确认属于 YR runtime 的其他必要格式
-
-传统 MOD 的目标体验是“尽可能零转换”：不要求先导入某个编辑器、不要求把 SHP/VXL 转成现代素材、不要求预解包 MIX 才能运行。
+也就是说，我们希望原版游戏或传统 MOD 中的 MIX、INI、MAP、SHP、VXL、HVA 等数据能够尽量保持原样，而不是先转换成另一套专用工程格式。
 
 ---
 
-## 给开发者和 AI Agent 的第一阅读顺序
+## 项目目标
 
-在开始写代码之前，请先阅读：
+计划兼容的传统 RA2YR 数据包括但不限于：
 
-### [`第一次与ChatGPT讨论的RA2YR C++ Engine 总实施计划 v1.md`](./第一次与ChatGPT讨论的RA2YR%20C%2B%2B%20Engine%20总实施计划%20v1.md)
+- MIX / nested MIX；
+- `rules.ini` / `rulesmd.ini`；
+- `art.ini` / `artmd.ini`；
+- Sound / AI 等 INI；
+- MAP；
+- SHP；
+- VXL；
+- HVA；
+- TMP；
+- PAL；
+- WAV / AUD；
+- CSF；
+- PCX；
+- IsoMapPack5 / OverlayPack / OverlayDataPack / PreviewPack；
+- 后续经研究确认属于 YR runtime 的其他必要格式和资源覆盖规则。
 
-这不是普通的 TODO，也不是必须永远逐字执行的“圣经”。
+传统 MOD 的目标体验是：
 
-它的作用是：
+> **尽可能零转换运行。**
 
-1. **项目背景记录**：说明为什么项目从此前的 Godot/Unity 路线转向 C++ 自研专用引擎；
-2. **第一次架构讨论记录**：保留维护者与 ChatGPT 第一次完整讨论中的思路、取舍、踩坑经验和 1~50 项关键决策；
-3. **长期参考基线**：记录项目最初冻结的兼容目标、技术栈、Simulation、Renderer、性能、稳定性、CI、MOD 和阶段计划；
-4. **防止失忆和重复争论**：未来开发者或 AI 不应在不了解历史原因的情况下随意把项目重新带回“重编辑器 + synthetic demo + foundation 完成即宣布 milestone 完成”的模式；
-5. **作为设计演进的起点**：未来如果实测、逆向研究或工程现实证明某项设计不合理，应新增 ADR / 新版本计划并记录为什么修改，而不是因为旧文档写过就拒绝事实。
-
-因此正确态度是：
-
-> **认真阅读、理解背景、默认遵循；遇到新证据时允许有记录地修订。**
-
----
-
-## 当前冻结的核心方向
-
-### 语言与工程
-
-- C++23
-- CMake
-- MSVC 为主要 Windows 工具链
-- clang-cl 作为第二编译器和 CI 验证
-- vcpkg manifest mode 管理并锁定第三方依赖
-- 自有代码高 warning level，并将 warning 视为 error
-
-### 平台
-
-- Windows 10 x64
-- Windows 11 x64
-- SDL3 负责 Window/Input/Platform 基础层
-- 首发图形 backend：自研 Direct3D 11，最低 Feature Level 11_0
-- Core / Simulation / Content 不应被 Windows API 污染，未来可增加其他平台 backend
-
-### 核心自研范围
-
-以下内容是本项目的核心能力，不能把第三方库变成其语义权威：
-
-- Westwood MIX / VFS
-- RA2YR content discovery / precedence
-- SHP / VXL / HVA / TMP / PAL / MAP 等 legacy runtime reader
-- Rules / Art / Sound / AI 数据驱动解析
-- Classic RA2YR Renderer semantics
-- deterministic Simulation
-- Pathfinding / Movement
-- Economy / Combat / Production / AI / Trigger
-- Traditional MOD compatibility
-- 后续 Ares / Phobos 配置和行为语义兼容
+也就是说，不要求用户先把 SHP/VXL 转成现代素材，不要求预解包 MIX，也不要求把 MOD 导入某个专有编辑器工程之后才能启动。
 
 ---
 
-## 最重要的开发纪律
+## 原版兼容与现代增强
 
-这个项目此前在别的引擎路线中已经付出过一个很大的代价：
-
-> 底层 parser、foundation 和自动化测试不断增加，但实际玩家打开程序时仍可能看到程序化绿地、蓝色矩形和不完整的真实资源。
-
-因此从本仓库开始，以下规则是硬要求。
-
-### 1. Parser PASS 不等于功能完成
-
-例如：
-
-```text
-MIX parser PASS
-MAP parser PASS
-TMP parser PASS
-```
-
-只能证明底层的一部分正确。
-
-如果真实地图仍然没有出现在 Game Window，当前阶段仍然是 **FAIL**。
-
-### 2. Synthetic fixture 不能冒充真实兼容性
-
-Synthetic/generated fixtures 用于：
-
-- unit test
-- malformed-input test
-- CI
-- deterministic regression
-
-但不能用于证明：
-
-- Stock YR 可运行
-- `ra2yrmix` 可运行
-- 某个传统 MOD 可运行
-
-真实兼容必须使用真实 compatibility corpus 验证。
-
-### 3. 不允许用 placeholder 隐藏失败
-
-Classic / strict compatibility 路径中：
-
-```text
-真实 SHP 失败 -> 蓝矩形
-真实 TMP 失败 -> 绿色平面
-```
-
-然后继续显示“READY”，这是禁止的。
-
-关键真实资源失败时应该 fail closed，并给出可诊断错误。
-
-### 4. Code is truth
-
-尽量避免隐藏编辑器状态。运行模式、资源来源、兼容 profile 等应通过源码或文本配置明确表达，并能通过 repository review 追踪。
-
-### 5. 不允许 screenshot-specific hack
-
-禁止为了某次人工验收截图临时：
-
-- hardcode 一个地图；
-- hardcode 一个本地绝对路径；
-- 特判某个 SHP/VXL；
-- 使用预解包 PNG 绕开 runtime reader；
-- 画程序化内容冒充真实资源。
-
----
-
-## 当前总体里程碑
-
-### P0 — Original Content Boot
-
-第一阶段只关注：
-
-```text
-Window
-+ D3D11
-+ VFS/MIX
-+ MAP/IsoMapPack5
-+ TMP
-+ PAL
-+ Terrain Renderer
-```
-
-### P0 最终人工验收
-
-> **启动程序，必须在窗口中真正看到从 `ra2yrmix` 的 MIX/MAP/TMP/PAL 链路直接解析出的 RA2YR 地图地形。**
-
-只有 parser tests，没有真实地图画面，不算 P0 完成。
-
-后续阶段大体为：
-
-- P1 Static Westwood World：SHP/Overlay/矿石/建筑/树木
-- P2 Voxel World：VXL/HVA
-- P3 Player Interaction
-- P4 Movement / A*
-- P5 Economy Vertical Slice
-- P6 Combat Vertical Slice
-- P7 Complete Classic Renderer
-- P8 Full GameData Compatibility
-- P9 UI / Audio / Game Shell
-- P10 Stock YR Compatibility
-- P11 Traditional MOD Compatibility
-- P12 Performance & Stability Certification
-- P13 Ares Compatibility
-- P14 Phobos Compatibility
-- P15 Enhanced Engine
-
-详细边界和验收要求见总实施计划文档。
-
----
-
-## Compatibility Corpus
-
-开发阶段维护者会提供：
-
-```text
-ra2yrmix/
-```
-
-它的定位是：
-
-> **Required Development Compatibility Corpus**
-
-本引擎至少必须能够直接读取和兼容其中纳入测试的内容。
-
-但 `ra2yrmix` 并不自动等于干净 Stock Yuri's Revenge 1.001 黄金标准。长期还需要建立：
-
-```text
-StockYR1001
-ra2yrmix
-TraditionalMods
-AresMods
-PhobosMods
-```
-
-多层 compatibility corpus。
-
-注意：测试素材的技术可读性与其是否适合公开分发是两个问题。若 corpus 含第三方受版权保护内容，应由维护者确认其分发授权；引擎本身不应把“公开仓库一定携带完整原版游戏 payload”设计成必要条件。
-
----
-
-## 性能与稳定性原则
-
-重置不能以性能明显差于原版为代价。
-
-当前 provisional benchmark 目标：
-
-### Low
-
-- 4GB system RAM
-- 11th-gen Intel Core i5 class CPU
-- integrated graphics
-- Low / Medium quality
-- 200 active units
-- 目标不低于 60 FPS
-
-### High
-
-- 8GB system RAM
-- 14th-gen Intel Core i5 class CPU
-- RTX 4060 class
-- Maximum quality
-- 1000 active units
-- 目标不低于 60 FPS
-
-这些是参考目标，必须在未来通过真实硬件和 workload benchmark 校准。
-
-稳定性目标包括：
-
-- memory leak = 0
-- use-after-free = 0
-- double-free = 0
-- invalid read/write = 0
-- 长时间运行内存不得无边界持续上涨
-
-项目将使用 RAII、显式 ownership、Result 类型、ASan/static analysis/fuzz/soak 等手段约束。
-
----
-
-## MOD 与扩展策略
+项目计划分为两个方向：
 
 ### Classic / Compatibility
 
-优先完成：
+优先实现：
 
-- Stock YR
-- Traditional YR MOD
-- FinalAlert 2 地图兼容
+- Stock Yuri's Revenge 1.001；
+- 传统 YR MOD；
+- FinalAlert 2 地图兼容；
+- 原版风格资源解析、渲染和游戏逻辑；
+- 后续逐步研究 Ares / Phobos 的配置与行为语义兼容。
 
-### 后续
+目标是让老资源、老地图和老 MOD 尽量无需修改即可运行。
 
-- Ares semantics
-- Phobos semantics
-- Modern asset providers
-- Lua scripting
-- Enhanced Renderer
-- 热重载
-- 更高级的编队和寻路策略
+### Enhanced
 
-不要求直接兼容 Ares/Phobos 给 `gamemd.exe` 注入的 32-bit DLL ABI。
+在 Classic 主线稳定之后，再逐步提供现代增强能力，例如：
+
+- 更高分辨率和高刷新率；
+- 宽屏 / 高 DPI；
+- 现代光照与阴影；
+- 现代资源格式；
+- Lua 扩展；
+- 热重载；
+- 更高级的编队和寻路策略；
+- 其他不破坏 Classic 兼容性的现代功能。
 
 ---
 
-## 对开发者的要求
+## 性能目标
 
-在提交一个“完成”结论前，必须回答当前 milestone 对应的真实问题。
+这个项目的意义不仅是“重新写一遍”，还包括解决老引擎在现代系统上的性能、稳定性和扩展性问题。
 
-例如资源/画面阶段优先报告：
+当前参考目标为：
+
+### Low
+
+- 4GB system RAM；
+- 11th-gen Intel Core i5 class CPU；
+- 集成显卡；
+- Low / Medium 画质；
+- 约 200 个活跃单位；
+- 目标不低于 60 FPS。
+
+### High
+
+- 8GB system RAM；
+- 14th-gen Intel Core i5 class CPU；
+- RTX 4060 class；
+- Maximum 画质；
+- 约 1000 个活跃单位；
+- 目标不低于 60 FPS。
+
+这些仍是早期参考目标，后续会通过真实硬件、真实地图和正式 benchmark workload 持续校准。
+
+稳定性方面，项目会重点防止：
+
+- memory leak；
+- use-after-free；
+- double-free；
+- invalid read/write；
+- 长时间运行内存持续无边界上涨。
+
+---
+
+## 地图与 MOD
+
+如果对 RA2YR 的 MAP 格式和相关数据做到足够完整的兼容，现有 **FinalAlert 2** 地图仍可以继续作为传统地图制作工具，而不需要因为换了新引擎就强迫所有地图作者迁移到新的编辑器。
+
+未来如果 Enhanced 功能超出 FA2 能力，再考虑新增专门的开发工具。
+
+传统 MOD 的核心原则仍然是：
 
 ```text
-Real MAP loaded: YES / NO
-Real TMP visible: YES / NO
-Real SHP visible: YES / NO
-Real VXL visible: YES / NO
-Synthetic fallback count: N
-Performance gate: PASS / FAIL
-Human verification: PASS / FAIL
+原有 MIX / INI / MAP / SHP / VXL / HVA ...
+                    ↓
+                RA2YR-bycpp
+                    ↓
+             尽可能直接运行
 ```
 
-自动化测试数量只是证据之一，不是最终结论。
+---
+
+## 当前开发状态
+
+项目目前处于 C++ 重启后的最早期阶段，**还不是可替代 `gamemd.exe` 的完整游戏版本**。
+
+当前第一阶段是：
+
+# P0 — Original Content Boot
+
+目标只聚焦一件事：
+
+> **从真实 RA2YR 测试内容中直接完成 MIX → MAP → TMP → PAL → D3D11 链路，并在程序窗口中真正显示出一张 RA2YR 地图。**
+
+P0 通过后，才会继续加入：
+
+- SHP / Overlay / 矿石 / 建筑 / 树木；
+- VXL / HVA 载具；
+- 鼠标选择和命令；
+- A* 移动；
+- 采矿、经济和生产；
+- 战斗；
+- 完整 Classic Renderer；
+- UI、声音和游戏外壳；
+- Stock YR / Traditional MOD / Ares / Phobos 兼容。
+
+因此当前仓库主要用于研发和兼容性验证，还不建议普通玩家作为成品游戏使用。
 
 ---
 
-## License / upstream game assets
+## 系统方向
 
-本仓库中的引擎源码与第三方依赖遵循各自许可证。
+首发目标平台：
 
-RA2YR / Westwood / Electronic Arts 的原版游戏素材、MOD 素材和其他第三方资源的权利属于其各自权利人。是否可以把某个测试 corpus 或原版 payload 提交到公开仓库，应单独依据其授权状态判断。
+- Windows 10 x64；
+- Windows 11 x64。
+
+首发图形后端计划使用 Direct3D 11，同时保持核心架构与平台层解耦，为未来其他平台留下空间。
 
 ---
 
-## 当前状态
+## 给开发者
 
-仓库处于 C++ 重启项目的最初阶段。
+如果你准备参与代码、格式研究、测试、性能分析，或者让 AI Agent 参与开发，请不要只依赖本 README。
 
-**当前优先事项不是战斗、经济、AI、多人或画面增强。**
+请阅读：
 
-第一优先级是 P0：
+### [`DEVELOPERS.md`](./DEVELOPERS.md)
 
-> 从真实 `ra2yrmix` 内容直接启动 MIX → MAP → TMP → PAL → D3D11 的可见地图链路。
+其中包含：
 
-先把第一张真实 RA2YR 地图画出来，再继续后面的系统。
+- 开发者阅读顺序；
+- 项目架构约束；
+- C++ 代码规范和质量门禁；
+- P0～P15 milestone；
+- Compatibility Corpus；
+- Timing / GameSpeed；
+- Pathfinding；
+- Hot Reload；
+- CI、性能和稳定性要求；
+- AI Coding Agent 的额外规则；
+- 第一次总实施计划文档的性质和使用方式。
+
+项目第一次完整架构讨论与长期参考基线保存在：
+
+[`第一次与ChatGPT讨论的RA2YR C++ Engine 总实施计划 v1.md`](./第一次与ChatGPT讨论的RA2YR%20C%2B%2B%20Engine%20总实施计划%20v1.md)
+
+---
+
+## 关于原版游戏和第三方资源
+
+本仓库开发的是兼容引擎。
+
+Red Alert 2、Yuri's Revenge、Westwood、Electronic Arts 以及各 MOD 中第三方素材的相关权利属于各自权利人。
+
+引擎源码的许可证与原版游戏数据、MOD 素材的授权是不同问题。使用者应自行确保其使用的原版游戏文件和第三方 MOD 内容来源合法并符合相应授权要求。
