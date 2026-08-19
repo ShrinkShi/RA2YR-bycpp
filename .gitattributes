@@ -1,14 +1,14 @@
 # RA2YR compatibility corpus binaries are stored with Git LFS.
-/尤里的复仇1.001/corpus/**/*.mix filter=lfs diff=lfs merge=lfs -text
-/尤里的复仇1.001/corpus/**/*.MIX filter=lfs diff=lfs merge=lfs -text
-/尤里的复仇1.001/corpus/**/*.yro filter=lfs diff=lfs merge=lfs -text
-/尤里的复仇1.001/corpus/**/*.map filter=lfs diff=lfs merge=lfs -text
-/尤里的复仇1.001/corpus/**/*.shp filter=lfs diff=lfs merge=lfs -text
-/尤里的复仇1.001/corpus/**/*.vxl filter=lfs diff=lfs merge=lfs -text
-/尤里的复仇1.001/corpus/**/*.hva filter=lfs diff=lfs merge=lfs -text
-/尤里的复仇1.001/corpus/**/*.tmp filter=lfs diff=lfs merge=lfs -text
-/尤里的复仇1.001/corpus/**/*.pal filter=lfs diff=lfs merge=lfs -text
-/尤里的复仇1.001/corpus/**/*.csf filter=lfs diff=lfs merge=lfs -text
+# Extension matching is explicitly case-insensitive for legacy Westwood assets.
+/CNCRA2YR1.001/corpus/**/*.[mM][iI][xX] filter=lfs diff=lfs merge=lfs -text
+/CNCRA2YR1.001/corpus/**/*.[yY][rR][oO] filter=lfs diff=lfs merge=lfs -text
+/CNCRA2YR1.001/corpus/**/*.[mM][aA][pP] filter=lfs diff=lfs merge=lfs -text
+/CNCRA2YR1.001/corpus/**/*.[sS][hH][pP] filter=lfs diff=lfs merge=lfs -text
+/CNCRA2YR1.001/corpus/**/*.[vV][xX][lL] filter=lfs diff=lfs merge=lfs -text
+/CNCRA2YR1.001/corpus/**/*.[hH][vV][aA] filter=lfs diff=lfs merge=lfs -text
+/CNCRA2YR1.001/corpus/**/*.[tT][mM][pP] filter=lfs diff=lfs merge=lfs -text
+/CNCRA2YR1.001/corpus/**/*.[pP][aA][lL] filter=lfs diff=lfs merge=lfs -text
+/CNCRA2YR1.001/corpus/**/*.[cC][sS][fF] filter=lfs diff=lfs merge=lfs -text
 
-# Preserve exact legacy INI bytes/line endings; keep them in normal Git for reviewability.
-/尤里的复仇1.001/corpus/**/*.ini -text
+# Preserve exact legacy INI bytes/line endings in normal Git.
+/CNCRA2YR1.001/corpus/**/*.[iI][nN][iI] -text

@@ -1,0 +1,615 @@
+{
+  "schema": 1,
+  "filenameDatabase": {
+    "source": "https://raw.githubusercontent.com/OpenRA/OpenRA/a520984d91eda9de48a62b1d15c1e3bad0d4fb1a/global%20mix%20database.dat",
+    "openraCommit": "a520984d91eda9de48a62b1d15c1e3bad0d4fb1a",
+    "gitBlobSha1": "273db510a3284d2dc533954e5ee3a909d6153a0e",
+    "byteLength": 421826,
+    "filenameCount": 24492
+  },
+  "explicitIniFilenameCandidateCount": 355,
+  "archiveCount": 55,
+  "resolvedNestedMixAdded": 0,
+  "resolvedLeafAssetsAdded": 4534,
+  "totalUnresolvedHashes": 5,
+  "archives": [
+    {
+      "containerChain": [
+        "expandmd01.mix"
+      ],
+      "fileCount": 33,
+      "hashType": "crc32",
+      "resolvedCount": 31,
+      "unresolvedCount": 2,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "langmd.mix"
+      ],
+      "fileCount": 10,
+      "hashType": "crc32",
+      "resolvedCount": 10,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "langmd.mix",
+        "audiomd.mix"
+      ],
+      "fileCount": 740,
+      "hashType": "crc32",
+      "resolvedCount": 740,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "langmd.mix",
+        "cameomd.mix"
+      ],
+      "fileCount": 70,
+      "hashType": "crc32",
+      "resolvedCount": 70,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "language.mix"
+      ],
+      "fileCount": 6,
+      "hashType": "crc32",
+      "resolvedCount": 6,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "language.mix",
+        "audio.mix"
+      ],
+      "fileCount": 461,
+      "hashType": "crc32",
+      "resolvedCount": 461,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "language.mix",
+        "cameo.mix"
+      ],
+      "fileCount": 203,
+      "hashType": "crc32",
+      "resolvedCount": 203,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "MAPSMD03.MIX"
+      ],
+      "fileCount": 14,
+      "hashType": "crc32",
+      "resolvedCount": 14,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "MULTIMD.MIX"
+      ],
+      "fileCount": 173,
+      "hashType": "crc32",
+      "resolvedCount": 170,
+      "unresolvedCount": 3,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix"
+      ],
+      "fileCount": 21,
+      "hashType": "crc32",
+      "resolvedCount": 21,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "cache.mix"
+      ],
+      "fileCount": 42,
+      "hashType": "crc32",
+      "resolvedCount": 42,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "conquer.mix"
+      ],
+      "fileCount": 289,
+      "hashType": "crc32",
+      "resolvedCount": 289,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "generic.mix"
+      ],
+      "fileCount": 139,
+      "hashType": "crc32",
+      "resolvedCount": 139,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "isogen.mix"
+      ],
+      "fileCount": 24,
+      "hashType": "crc32",
+      "resolvedCount": 24,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "isosnow.mix"
+      ],
+      "fileCount": 1013,
+      "hashType": "crc32",
+      "resolvedCount": 1013,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "isotemp.mix"
+      ],
+      "fileCount": 1035,
+      "hashType": "crc32",
+      "resolvedCount": 1035,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "isourb.mix"
+      ],
+      "fileCount": 1257,
+      "hashType": "crc32",
+      "resolvedCount": 1257,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "load.mix"
+      ],
+      "fileCount": 83,
+      "hashType": "crc32",
+      "resolvedCount": 83,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "local.mix"
+      ],
+      "fileCount": 607,
+      "hashType": "crc32",
+      "resolvedCount": 607,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "neutral.mix"
+      ],
+      "fileCount": 69,
+      "hashType": "crc32",
+      "resolvedCount": 69,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "sidec01.mix"
+      ],
+      "fileCount": 51,
+      "hashType": "crc32",
+      "resolvedCount": 51,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "sidec02.mix"
+      ],
+      "fileCount": 51,
+      "hashType": "crc32",
+      "resolvedCount": 51,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "sidenc01.mix"
+      ],
+      "fileCount": 85,
+      "hashType": "crc32",
+      "resolvedCount": 85,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "sidenc02.mix"
+      ],
+      "fileCount": 77,
+      "hashType": "crc32",
+      "resolvedCount": 77,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "sno.mix"
+      ],
+      "fileCount": 3,
+      "hashType": "crc32",
+      "resolvedCount": 3,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "snow.mix"
+      ],
+      "fileCount": 377,
+      "hashType": "crc32",
+      "resolvedCount": 377,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "tem.mix"
+      ],
+      "fileCount": 3,
+      "hashType": "crc32",
+      "resolvedCount": 3,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "temperat.mix"
+      ],
+      "fileCount": 237,
+      "hashType": "crc32",
+      "resolvedCount": 237,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "urb.mix"
+      ],
+      "fileCount": 3,
+      "hashType": "crc32",
+      "resolvedCount": 3,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2.mix",
+        "urban.mix"
+      ],
+      "fileCount": 237,
+      "hashType": "crc32",
+      "resolvedCount": 237,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix"
+      ],
+      "fileCount": 25,
+      "hashType": "crc32",
+      "resolvedCount": 25,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "cachemd.mix"
+      ],
+      "fileCount": 14,
+      "hashType": "crc32",
+      "resolvedCount": 14,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "conqmd.mix"
+      ],
+      "fileCount": 40,
+      "hashType": "crc32",
+      "resolvedCount": 40,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "des.mix"
+      ],
+      "fileCount": 3,
+      "hashType": "crc32",
+      "resolvedCount": 3,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "desert.mix"
+      ],
+      "fileCount": 241,
+      "hashType": "crc32",
+      "resolvedCount": 241,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "genermd.mix"
+      ],
+      "fileCount": 81,
+      "hashType": "crc32",
+      "resolvedCount": 81,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "isodes.mix"
+      ],
+      "fileCount": 1923,
+      "hashType": "crc32",
+      "resolvedCount": 1923,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "isodesmd.mix"
+      ],
+      "fileCount": 22,
+      "hashType": "crc32",
+      "resolvedCount": 22,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "isogenmd.mix"
+      ],
+      "fileCount": 82,
+      "hashType": "crc32",
+      "resolvedCount": 82,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "isolun.mix"
+      ],
+      "fileCount": 698,
+      "hashType": "crc32",
+      "resolvedCount": 698,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "isolunmd.mix"
+      ],
+      "fileCount": 40,
+      "hashType": "crc32",
+      "resolvedCount": 40,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "isosnomd.mix"
+      ],
+      "fileCount": 178,
+      "hashType": "crc32",
+      "resolvedCount": 178,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "isotemmd.mix"
+      ],
+      "fileCount": 45,
+      "hashType": "crc32",
+      "resolvedCount": 45,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "isoubn.mix"
+      ],
+      "fileCount": 1412,
+      "hashType": "crc32",
+      "resolvedCount": 1412,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "isoubnmd.mix"
+      ],
+      "fileCount": 111,
+      "hashType": "crc32",
+      "resolvedCount": 111,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "isourbmd.mix"
+      ],
+      "fileCount": 57,
+      "hashType": "crc32",
+      "resolvedCount": 57,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "loadmd.mix"
+      ],
+      "fileCount": 59,
+      "hashType": "crc32",
+      "resolvedCount": 59,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "localmd.mix"
+      ],
+      "fileCount": 187,
+      "hashType": "crc32",
+      "resolvedCount": 187,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "lun.mix"
+      ],
+      "fileCount": 3,
+      "hashType": "crc32",
+      "resolvedCount": 3,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "lunar.mix"
+      ],
+      "fileCount": 242,
+      "hashType": "crc32",
+      "resolvedCount": 242,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "ntrlmd.mix"
+      ],
+      "fileCount": 74,
+      "hashType": "crc32",
+      "resolvedCount": 74,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "sidec02md.mix"
+      ],
+      "fileCount": 7,
+      "hashType": "crc32",
+      "resolvedCount": 7,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "snowmd.mix"
+      ],
+      "fileCount": 80,
+      "hashType": "crc32",
+      "resolvedCount": 80,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "ubn.mix"
+      ],
+      "fileCount": 3,
+      "hashType": "crc32",
+      "resolvedCount": 3,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    },
+    {
+      "containerChain": [
+        "ra2md.mix",
+        "urbann.mix"
+      ],
+      "fileCount": 241,
+      "hashType": "crc32",
+      "resolvedCount": 241,
+      "unresolvedCount": 0,
+      "localDatabaseFilenameCount": 0
+    }
+  ]
+}

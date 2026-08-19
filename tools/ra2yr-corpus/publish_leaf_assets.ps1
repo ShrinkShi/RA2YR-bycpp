@@ -101,11 +101,24 @@ $ExpectedLfsCount = @(
         $LfsExtensions -contains [System.IO.Path]::GetExtension([string]$_.path).ToLowerInvariant()
     }
 ).Count
-$ActualLfsFiles = @(git lfs ls-files --name-only)
-Assert-LastExitCode "git lfs ls-files"
+# Validate the staged snapshot rather than HEAD/working-tree discovery.
+# git lfs ls-files without a ref does not represent the full staged tree when
+# thousands of newly-added LFS paths have not been committed yet.
+$ValidationTree = (git write-tree).Trim()
+Assert-LastExitCode "git write-tree for LFS validation"
+
+$ValidationCommit = (git commit-tree $ValidationTree -p HEAD -m "temporary corpus LFS validation").Trim()
+Assert-LastExitCode "git commit-tree for LFS validation"
+
+$ActualLfsFiles = @(git lfs ls-files --name-only $ValidationCommit)
+Assert-LastExitCode "git lfs ls-files staged snapshot"
+
 if ($ActualLfsFiles.Count -ne $ExpectedLfsCount) {
-    throw "Git LFS coverage mismatch: manifest expects $ExpectedLfsCount LFS-managed files, but git lfs ls-files reports $($ActualLfsFiles.Count)."
+    throw "Git LFS coverage mismatch: manifest expects $ExpectedLfsCount LFS-managed files, but staged snapshot reports $($ActualLfsFiles.Count)."
 }
+
+git lfs fsck --pointers $ValidationCommit
+Assert-LastExitCode "git lfs fsck staged pointers"
 
 git diff --cached --quiet
 if ($LASTEXITCODE -eq 0) {

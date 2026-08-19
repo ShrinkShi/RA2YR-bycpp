@@ -416,7 +416,7 @@ def collect_explicit_ini_filenames(corpus: Path) -> set[str]:
 
 
 def build(source: Path, repo_root: Path, mix_database: Path | None) -> None:
-    corpus = repo_root / "尤里的复仇1.001" / "corpus"
+    corpus = repo_root / "CNCRA2YR1.001" / "corpus"
     if corpus.exists():
         shutil.rmtree(corpus)
 
@@ -605,21 +605,39 @@ def build(source: Path, repo_root: Path, mix_database: Path | None) -> None:
                 raise AssertionError("resolved MIX entry disappeared")
 
             if extension == ".mix":
-                nested_destination = corpus / "nested" / Path(*chain) / relative_name
-                if not nested_destination.exists():
-                    write_bytes(raw, nested_destination)
-                    record(
-                        nested_destination,
-                        resolution.filename,
-                        "nested-mix-resolved",
-                        " -> ".join(chain),
-                        mixHash=f"0x{file_hash:08X}",
-                        hashType=hash_type,
-                        resolutionSource=resolution.source,
-                        containerChain=list(chain),
-                    )
-                    resolved_nested_count += 1
                 child_chain = chain + tuple(relative_name.parts)
+                audited_destination = corpus / "nested" / Path(*child_chain)
+                if audited_destination.is_file():
+                    if audited_destination.read_bytes() != raw:
+                        raise ValueError(
+                            f"Audited nested MIX bytes disagree with resolved parent entry: "
+                            f"{' -> '.join(child_chain)}"
+                        )
+                    nested_destination = audited_destination
+                else:
+                    nested_base = corpus / "nested-recursive"
+                    for part in chain:
+                        nested_base /= f"{part}.contents"
+                    nested_destination = nested_base / relative_name
+                    if nested_destination.exists():
+                        if nested_destination.read_bytes() != raw:
+                            raise ValueError(
+                                f"Recursive nested MIX changed while resolving: "
+                                f"{' -> '.join(child_chain)}"
+                            )
+                    else:
+                        write_bytes(raw, nested_destination)
+                        record(
+                            nested_destination,
+                            resolution.filename,
+                            "nested-mix-resolved",
+                            " -> ".join(chain),
+                            mixHash=f"0x{file_hash:08X}",
+                            hashType=hash_type,
+                            resolutionSource=resolution.source,
+                            containerChain=list(chain),
+                        )
+                        resolved_nested_count += 1
                 jobs.append((nested_destination, child_chain))
                 continue
 

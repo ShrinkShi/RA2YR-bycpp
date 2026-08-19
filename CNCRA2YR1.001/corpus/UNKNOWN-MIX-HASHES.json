@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "count": 5,
+  "entries": [
+    {
+      "containerChain": [
+        "expandmd01.mix"
+      ],
+      "hash": "0x60DE6674",
+      "offset": 3062432,
+      "length": 768
+    },
+    {
+      "containerChain": [
+        "expandmd01.mix"
+      ],
+      "hash": "0xA75B3F2B",
+      "offset": 3063200,
+      "length": 175832
+    },
+    {
+      "containerChain": [
+        "MULTIMD.MIX"
+      ],
+      "hash": "0x61B60AB4",
+      "offset": 14020800,
+      "length": 264686
+    },
+    {
+      "containerChain": [
+        "MULTIMD.MIX"
+      ],
+      "hash": "0x9498E004",
+      "offset": 19173936,
+      "length": 137823
+    },
+    {
+      "containerChain": [
+        "MULTIMD.MIX"
+      ],
+      "hash": "0x94C4BDFA",
+      "offset": 89600,
+      "length": 113837
+    }
+  ]
+}
