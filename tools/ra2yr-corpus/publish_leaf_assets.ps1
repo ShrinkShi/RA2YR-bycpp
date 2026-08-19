@@ -65,6 +65,10 @@ git lfs install --local
 Assert-LastExitCode "git lfs install --local"
 
 $Builder = Join-Path $PSScriptRoot "build_corpus.py"
+$Patcher = Join-Path $PSScriptRoot "patch_stage2_builder.py"
+py $Patcher --builder $Builder
+Assert-LastExitCode "apply Stage 2 builder safety patch"
+
 $BuilderArgs = @($Builder, "--source", $SourceDir, "--repo-root", $RepoRoot)
 if ($MixDatabase) {
     if (-not (Test-Path -LiteralPath $MixDatabase -PathType Leaf)) {
