@@ -115,6 +115,28 @@
 
 第二份文档是对第一份基线的扩展，不是替代。若两份文档涉及不同阶段目标，应按“保留 Classic 兼容 + 新增通用抽象”的原则理解；未明确冻结的问题仍应以研究和实测为准。
 
+### 2026-08-25 — 通用 RTS AI 架构原则冻结
+
+第三次专题讨论暂时跳过 Trigger 与最终统一数据模型，先冻结 AI 与 Simulation 之间的边界。AI 被定义为一种 Player Controller：真人、RuleBased AI、Neural AI 等最终都通过相同的 `Command → Order` 通道操作 Simulation，正常 AI 不允许直接修改资源、单位或世界状态。
+
+本次重点确认：
+
+- AI 默认只能读取当前玩家合法可知的结构化 Observation；
+- 战争迷雾中的敌军使用 Last Known Information，不泄漏实时世界状态；
+- 公平 AI 受到反应延迟和 Action Budget 约束，避免依靠无限操作频率形成“超人微操”；
+- Strategic / Tactical / Micro 作为逻辑分层，但具体算法可替换；
+- RuleBased AI 作为测试、Baseline 与早期训练对手必须存在；
+- Neural AI 长期推荐 Replay 模仿学习 → Self-play → League 的训练路线；
+- Replay、Headless 高速 Simulation、受控随机种子和尽量确定性的 Simulation 被视为 AI 基础设施；
+- Observation / Action Schema 必须面向通用 RTS，不能绑定固定单位列表；
+- AI Skill 与 Personality 分离；作弊 AI 可以存在，但必须与公平难度明确区分。
+
+记录：
+
+[`第三次与ChatGPT讨论的通用RTS AI架构原则 v1.md`](./第三次与ChatGPT讨论的通用RTS%20AI架构原则%20v1.md)
+
+这份文档冻结的是 AI 的接口、公平性和训练基础设施边界，不冻结具体神经网络算法、模型拓扑或难度参数。
+
 ---
 
 ## 性能目标
@@ -254,10 +276,11 @@ P0 通过后，才会继续加入：
 - AI Coding Agent 的额外规则；
 - 第一次总实施计划文档的性质和使用方式。
 
-两次正式讨论记录分别保存为：
+三次正式讨论记录分别保存为：
 
 1. [`第一次与ChatGPT讨论的RA2YR C++ Engine 总实施计划 v1.md`](./第一次与ChatGPT讨论的RA2YR%20C%2B%2B%20Engine%20总实施计划%20v1.md) — C++ 重启、RA2YR 兼容与长期实施基线；
-2. [`第二次与ChatGPT讨论的通用RTS规则框架与红色际霸设计记录 v1.md`](./第二次与ChatGPT讨论的通用RTS规则框架与红色际霸设计记录%20v1.md) — 通用 RTS 方向、红色际霸混合规则与后续 AI / Trigger / 统一模型专题入口。
+2. [`第二次与ChatGPT讨论的通用RTS规则框架与红色际霸设计记录 v1.md`](./第二次与ChatGPT讨论的通用RTS规则框架与红色际霸设计记录%20v1.md) — 通用 RTS 方向、红色际霸混合规则与后续 AI / Trigger / 统一模型专题入口；
+3. [`第三次与ChatGPT讨论的通用RTS AI架构原则 v1.md`](./第三次与ChatGPT讨论的通用RTS%20AI架构原则%20v1.md) — AI Player Controller、公平 Observation / Action、三级决策、Replay / Headless / Determinism 与训练路线基线。
 
 阅读时优先区分“已经冻结的当前规则”和“尚待研究的方向”，不要把讨论性建议直接当成实现事实。
 
