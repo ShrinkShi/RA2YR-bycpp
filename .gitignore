@@ -1,0 +1,9 @@
+/build/
+/.vs/
+/.idea/
+*.user
+*.suo
+*.pdb
+*.ilk
+*.obj
+*.vcxproj*

@@ -1,0 +1,6 @@
+{
+  "name": "ra2yr-bycpp",
+  "version-string": "0.1.0",
+  "description": "Data-driven RA2YR-compatible RTS runtime first playable editor slice",
+  "dependencies": ["sdl3"]
+}

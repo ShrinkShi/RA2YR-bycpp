@@ -199,6 +199,19 @@
 
 项目目前处于 C++ 重启后的最早期阶段，**还不是可替代 `gamemd.exe` 的完整游戏版本**。
 
+当前 `feature/first-playable-editor-shell` 分支新增第一轮可玩编辑器垂直切片：
+
+- `C++23 + CMake + SDL3 + Direct3D 11` 客户端工程骨架；
+- DTA/CnCNet 风格独立按钮主菜单；
+- 同一 EXE 内的 Editor/Sandbox 模式；
+- 程序化 64x64 等距草地开发地图；
+- Rules 驱动 E2/M1Carbine/SA/InvisibleLow 数据读取；
+- 外部兼容语料中的真实 `CONS.SHP`、`unittem.pal` 读取与红蓝 owner remap；
+- 选择、移动、停止、Hold、巡逻、Attack Move、攻击、扣血和死亡；
+- 右下角 3 行 5 列 Command Card。
+
+该 slice 的范围、构建与 Classic 兼容边界见 [`docs/FIRST_PLAYABLE_EDITOR_SLICE.md`](./docs/FIRST_PLAYABLE_EDITOR_SLICE.md)。其中程序化草地明确属于 Development Sandbox，不代表真实 TMP/MAP 兼容已经完成。
+
 当前第一阶段是：
 
 # P0 — Original Content Boot
