@@ -10,7 +10,7 @@ From the repository root, run:
 .\tools\dev\dev.ps1
 ```
 
-The script discovers Visual Studio with `vswhere`, imports the x64 `VsDevCmd.bat` environment, validates CMake/Ninja/vcpkg/corpus, configures on the first run, builds, runs CTest, and starts `ra2yr_client.exe`. Existing configured builds reuse their cache and do not reinstall dependencies. Use `.\tools\dev\dev.ps1 -Clean` only when a generated build cache must be discarded.
+The script discovers Visual Studio with `vswhere`, imports the x64 `VsDevCmd.bat` environment, validates CMake/Ninja/vcpkg, configures on the first run, builds, runs CTest, and starts `ra2yr_client.exe`. It uses the project-owned `INI/` and `assets/` content copied beside the executable; `RA2YR_CORPUS_ROOT` is optional. Existing configured builds reuse their cache and do not reinstall dependencies. Use `.\tools\dev\dev.ps1 -Clean` only when a generated build cache must be discarded.
 
 The standalone commands are:
 
@@ -21,18 +21,19 @@ The standalone commands are:
 .\tools\dev\run.ps1
 ```
 
-Each script fails immediately if a required tool, configuration, asset, or command is missing.
+Each script fails immediately if a required tool, configuration, project-owned asset, or command is missing.
 
 ## Visual Studio
 
 After setting the user-level `VCPKG_ROOT` and reopening Visual Studio, select the `windows-vcpkg` CMake configure preset. The existing build and test presets remain available for the Ninja workflow. A local `CMakeUserPresets.json` is supported and ignored, but is not required for the standard setup.
 
-## Corpus
+## Runtime content and optional corpus
 
-The scripts discover a complete local corpus through `RA2YR_CORPUS_ROOT` or the Git worktrees registered for this repository. They require:
+The normal build/test/run flow does not discover or require a complete corpus. The executable uses content beside itself:
 
-- `extracted/ini/yr-1.001-patch/rulesmd.ini`
-- `extracted/leaf/ra2.mix/conquer.mix/cons.shp`
-- `extracted/leaf/ra2.mix/cache.mix/unittem.pal`
+- `INI/Rules.ini`
+- `INI/Art.ini`
+- `assets/game/ra2/infantry/CONS.SHP`
+- `assets/game/ra2/palettes/unittem.pal`
 
-The corpus is read from its own worktree and is never copied into the feature branch.
+`RA2YR_CORPUS_ROOT` remains an optional path for future corpus integration/import/Classic workflows. The complete corpus is read from its separate worktree and is never copied into the feature branch.

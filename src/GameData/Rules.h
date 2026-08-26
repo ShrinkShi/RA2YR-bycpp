@@ -21,7 +21,13 @@ struct UnitDefinition {
     std::string name = "Conscript";
     int strength = 125;
     int speed = 4;
-    std::string armor = "flak";
+    int armorValue = 0;
+    std::string armorType = "Light";
+    std::string unitTag = "E2";
+    int sight = 5;
+    bool selectable = true;
+    bool autoAcquire = true;
+    bool returnFire = true;
     WeaponDefinition primary;
 };
 

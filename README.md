@@ -202,11 +202,11 @@
 当前 `feature/first-playable-editor-shell` 分支新增第一轮可玩编辑器垂直切片：
 
 - `C++23 + CMake + SDL3 + Direct3D 11` 客户端工程骨架；
-- DTA/CnCNet 风格独立按钮主菜单；
+- RA2/YR 红黑 CRT / 银灰金属控制台主菜单，使用独立图片按钮和 hover/pressed 状态；DTA/CnCNet 仅作组件结构参考；
 - 同一 EXE 内的 Editor/Sandbox 模式；
 - 程序化 64x64 等距草地开发地图；
 - Rules 驱动 E2/M1Carbine/SA/InvisibleLow 数据读取；
-- 外部兼容语料中的真实 `CONS.SHP`、`unittem.pal` 读取与红蓝 owner remap；
+- 项目自有最小运行素材中的真实 `CONS.SHP`、`unittem.pal` 读取与红蓝 owner remap；
 - 选择、移动、停止、Hold、巡逻、Attack Move、攻击、扣血和死亡；
 - 右下角 3 行 5 列 Command Card。
 
@@ -218,7 +218,7 @@
 
 目标只聚焦一件事：
 
-> **从真实 RA2YR 测试内容中直接完成 MIX → MAP → TMP → PAL → D3D11 链路，并在程序窗口中真正显示出一张 RA2YR 地图。**
+> **先用项目自有最小素材完成 Rules/Art → SHP/PAL → D3D11 链路，并在程序窗口中稳定显示首轮编辑器切片。**
 
 P0 通过后，才会继续加入：
 

@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.28)
 
 project(RA2YRByCpp VERSION 0.1.0 LANGUAGES CXX)
 
+# This slice does not use C++ modules. Disable MSVC dependency scanning so the
+# project remains compatible with newer MSVC/CMake combinations.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -20,6 +24,8 @@ add_library(ra2yr_core
     src/Westwood/Palette/Palette.h
     src/Westwood/Shp/Shp.cpp
     src/Westwood/Shp/Shp.h
+    src/GameData/Art.cpp
+    src/GameData/Art.h
     src/GameData/Rules.cpp
     src/GameData/Rules.h
     src/Simulation/Simulation.cpp
@@ -41,7 +47,7 @@ add_executable(ra2yr_client
     src/Renderer/D3D11Renderer.h
 )
 
-target_link_libraries(ra2yr_client PRIVATE ra2yr_core SDL3::SDL3 d3d11 dxgi d3dcompiler d2d1 dwrite gdi32 user32)
+target_link_libraries(ra2yr_client PRIVATE ra2yr_core SDL3::SDL3 d3d11 dxgi d3dcompiler d2d1 dwrite windowscodecs ole32 user32)
 target_compile_definitions(ra2yr_client PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN SDL_MAIN_HANDLED)
 
 if(MSVC)
@@ -64,8 +70,10 @@ endif()
 add_test(NAME ra2yr_core_tests COMMAND ra2yr_tests)
 
 add_custom_command(TARGET ra2yr_client POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:ra2yr_client>/assets/ui"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets/ui/strings.ini"
-        "$<TARGET_FILE_DIR:ra2yr_client>/assets/ui/strings.ini"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/INI"
+        "$<TARGET_FILE_DIR:ra2yr_client>/INI"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        "$<TARGET_FILE_DIR:ra2yr_client>/assets"
 )

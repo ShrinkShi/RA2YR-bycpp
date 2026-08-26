@@ -6,7 +6,6 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Get-RepoRoot
 $environment = Initialize-DeveloperEnvironment $repoRoot
-[void](Resolve-CorpusRoot $repoRoot)
 
 if ($Clean) { Remove-FailedBuildCache $repoRoot }
 $cache = Join-Path (Get-BuildRoot $repoRoot) "CMakeCache.txt"

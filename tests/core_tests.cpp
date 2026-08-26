@@ -1,4 +1,6 @@
+#include "GameData/Art.h"
 #include "GameData/Rules.h"
+#include "Westwood/Palette/Palette.h"
 #include "Simulation/Simulation.h"
 #include "Westwood/Ini/Ini.h"
 #include "Westwood/Shp/Shp.h"
@@ -38,6 +40,40 @@ Inviso=yes
     assert(ini.get("E2", "Primary") == "M1Carbine");
     assert(ini.get("InlineSection", "Value") == "ok");
     assert(ini.getBool("InvisibleLow", "Inviso"));
+
+    const std::filesystem::path contentRoot = std::filesystem::current_path();
+    const std::filesystem::path rulesPath = contentRoot / "INI/Rules.ini";
+    const std::filesystem::path artPath = contentRoot / "INI/Art.ini";
+    const std::filesystem::path spritePath = contentRoot / "assets/game/ra2/infantry/CONS.SHP";
+    const std::filesystem::path palettePath = contentRoot / "assets/game/ra2/palettes/unittem.pal";
+    assert(std::filesystem::exists(rulesPath));
+    assert(std::filesystem::exists(artPath));
+    assert(std::filesystem::exists(spritePath));
+    assert(std::filesystem::exists(palettePath));
+
+    gamedata::RulesDatabase rules;
+    assert(rules.load(rulesPath, error));
+    assert(rules.e2().id == "E2");
+    assert(rules.e2().image == "CONS");
+    assert(rules.e2().armorValue == 0 && rules.e2().armorType == "Light");
+    assert(rules.e2().selectable && rules.e2().autoAcquire && rules.e2().returnFire);
+    assert(rules.e2().primary.projectile == "InvisibleLow");
+
+    gamedata::ArtDatabase art;
+    assert(art.load(artPath, error));
+    assert(art.find("CONS") != nullptr);
+    assert(art.find("CONS")->remapable);
+    assert(art.frameIndex("CONS", "Ready") == 0);
+    assert(art.frameIndex("CONS", "Walk") == 8);
+    assert(art.frameIndex("CONS", "Fire") == 164);
+    assert(art.frameIndex("CONS", "Death") == 134);
+
+    westwood::ShpTsDocument projectShp;
+    assert(projectShp.load(spritePath, error));
+    assert(projectShp.width() == 76 && projectShp.height() == 96 && projectShp.frameCount() == 602);
+    westwood::Palette projectPalette;
+    assert(projectPalette.load(palettePath, error));
+    assert(projectPalette.remappedColor(0xc0U, Owner::Red).r != projectPalette.remappedColor(0xc0U, Owner::Blue).r);
 
     IsoProjection projection;
     for (const GridCoord coordinate : std::vector<GridCoord>{{0, 0}, {3, 7}, {24, 11}, {63, 63}}) {

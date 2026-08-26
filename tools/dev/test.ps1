@@ -4,7 +4,6 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Get-RepoRoot
 $environment = Initialize-DeveloperEnvironment $repoRoot
-[void](Resolve-CorpusRoot $repoRoot)
 if (-not (Test-Path -LiteralPath (Join-Path (Get-BuildRoot $repoRoot) "CTestTestfile.cmake"))) {
     throw "CTest configuration is missing. Run .\tools\dev\setup.ps1 and build first."
 }

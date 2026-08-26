@@ -152,7 +152,8 @@ function Resolve-CorpusRoot {
         }
     }
 
-    throw "A complete RA2YR corpus was not found. Set RA2YR_CORPUS_ROOT to a directory containing rulesmd.ini, cons.shp and unittem.pal."
+    Write-Info "No complete RA2YR corpus found; project-owned Development Sandbox assets remain available."
+    return $null
 }
 
 function Initialize-DeveloperEnvironment {

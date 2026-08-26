@@ -1,4 +1,5 @@
 #include "GameData/Rules.h"
+#include "GameData/Art.h"
 #include "Renderer/D3D11Renderer.h"
 #include "Simulation/Simulation.h"
 #include "Westwood/Ini/Ini.h"
@@ -10,12 +11,16 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <deque>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace ra2yr::client {
@@ -41,7 +46,19 @@ enum class PendingAction {
 
 struct MenuButton {
     std::string key;
+    std::string image;
+    std::string hoverImage;
     Rect rect;
+};
+
+struct PerformanceTracker {
+    std::deque<float> recentFrameTimesMs;
+    float averageFps = 0.0F;
+    float frameTimeMs = 0.0F;
+    float p95FrameTimeMs = 0.0F;
+    float simulationTimeMs = 0.0F;
+    float renderCpuTimeMs = 0.0F;
+    bool showOverlay = false;
 };
 
 std::wstring utf8ToWide(const std::string& value) {
@@ -59,7 +76,7 @@ std::wstring utf8ToWide(const std::string& value) {
 
 class ClientApp {
 public:
-    bool initialize(std::string& error) {
+    bool initialize(std::string& error, bool stressEntities) {
         SDL_SetAppMetadata("RA2YR-bycpp", "0.1.0", "com.shrinkshi.ra2yr-bycpp");
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
             error = SDL_GetError();
@@ -74,27 +91,57 @@ public:
         if (!renderer_.initialize(window_, error)) {
             return false;
         }
+        contentRoot_ = executableDirectory();
         loadStrings();
-        loadRuntimeAssets();
+        if (!loadRuntimeAssets(error)) {
+            return false;
+        }
+        if (!buildTerrain(error)) {
+            return false;
+        }
         simulation_ = std::make_unique<simulation::Simulation>(rules_.e2());
-        simulation_->spawn(Owner::Red, {22, 28});
-        simulation_->spawn(Owner::Red, {25, 31});
-        simulation_->spawn(Owner::Blue, {39, 29});
-        simulation_->spawn(Owner::Blue, {42, 32});
+        // Keep the sample forces inside the initial camera framing so the
+        // first editor run visibly demonstrates both owner colors.
+        simulation_->spawn(Owner::Red, {8, 12});
+        simulation_->spawn(Owner::Red, {12, 10});
+        simulation_->spawn(Owner::Blue, {20, 8});
+        simulation_->spawn(Owner::Blue, {16, 12});
+        if (stressEntities) {
+            for (int index = 0; index < 100; ++index) {
+                const Owner owner = index < 50 ? Owner::Red : Owner::Blue;
+                const int localIndex = index % 50;
+                simulation_->spawn(owner, {16 + (localIndex % 10) * 2, 18 + (localIndex / 10) * 2});
+            }
+        }
         return true;
     }
 
     int run() {
         auto previous = std::chrono::steady_clock::now();
+        double simulationAccumulator = 0.0;
+        constexpr double kSimulationStep = 1.0 / 60.0;
         while (running_) {
+            const auto frameStart = std::chrono::steady_clock::now();
             const auto now = std::chrono::steady_clock::now();
-            const float seconds = std::min(0.1F, std::chrono::duration<float>(now - previous).count());
+            const double seconds = std::min(0.25, std::chrono::duration<double>(now - previous).count());
             previous = now;
+            simulationAccumulator += seconds;
             processEvents();
+            const auto simulationStart = std::chrono::steady_clock::now();
             if (mode_ == AppMode::EditorSandbox) {
-                simulation_->update(seconds);
+                while (simulationAccumulator >= kSimulationStep) {
+                    simulation_->update(static_cast<float>(kSimulationStep));
+                    simulationAccumulator -= kSimulationStep;
+                }
             }
+            const float simulationMs = std::chrono::duration<float, std::milli>(
+                std::chrono::steady_clock::now() - simulationStart).count();
+            const auto renderStart = std::chrono::steady_clock::now();
             render();
+            const float renderMs = std::chrono::duration<float, std::milli>(
+                std::chrono::steady_clock::now() - renderStart).count();
+            recordPerformance(std::chrono::duration<float, std::milli>(
+                std::chrono::steady_clock::now() - frameStart).count(), simulationMs, renderMs);
         }
         return 0;
     }
@@ -108,9 +155,17 @@ public:
     }
 
 private:
+    static std::filesystem::path executableDirectory() {
+        const char* basePath = SDL_GetBasePath();
+        if (basePath == nullptr) {
+            return std::filesystem::current_path();
+        }
+        return std::filesystem::path(utf8ToWide(basePath));
+    }
+
     void loadStrings() {
         strings_ = {
-            {"title", L"RA2YR-BYCPP"}, {"subtitle", L"FIRST PLAYABLE EDITOR SLICE"},
+            {"title", L"COMMAND & CONQUER"}, {"subtitle", L"YURI'S REVENGE"},
             {"campaign", L"CAMPAIGN"}, {"load", L"LOAD GAME"}, {"skirmish", L"SKIRMISH"},
             {"online", L"ONLINE"}, {"lan", L"LAN"}, {"settings", L"SETTINGS"},
             {"statistics", L"STATISTICS"}, {"editor", L"MAP EDITOR"}, {"exit", L"EXIT GAME"},
@@ -123,58 +178,75 @@ private:
             {"weapon", L"WEAPON"}, {"armor", L"ARMOR"}, {"move", L"MOVE"}, {"stop", L"STOP"},
             {"guard", L"GUARD"}, {"attack", L"ATTACK"}, {"deploy", L"DEPLOY"}, {"hold", L"HOLD"},
             {"patrol", L"PATROL"}, {"repair", L"REPAIR"}, {"waypoint", L"WAYPOINT"}, {"attack_move", L"ATTACK MOVE"},
-            {"runtime", L"SIMULATION ONLINE"}, {"asset_missing", L"REAL CONS.SHP / UNIT PALETTE NOT FOUND"},
+            {"runtime", L"SIMULATION ONLINE"}, {"asset_missing", L"RUNTIME ASSETS NOT FOUND"},
         };
-        const std::filesystem::path executablePath = std::filesystem::absolute(".");
-        const std::filesystem::path candidates[] = {
-            executablePath / "assets/ui/strings.ini",
-            std::filesystem::current_path() / "assets/ui/strings.ini",
-        };
-        for (const auto& path : candidates) {
-            std::string error;
-            westwood::IniDocument document;
-            if (!document.load(path, error)) {
-                continue;
-            }
-            for (const auto& [key, fallback] : strings_) {
-                strings_[key] = utf8ToWide(document.get("ui", key, ""));
-                if (strings_[key].empty()) {
-                    strings_[key] = fallback;
+        westwood::IniDocument document;
+        std::string error;
+        if (document.load(contentRoot_ / "assets/ui/strings.ini", error)) {
+            for (auto& [key, value] : strings_) {
+                const std::wstring localized = utf8ToWide(document.get("ui", key, ""));
+                if (!localized.empty()) {
+                    value = localized;
                 }
             }
-            return;
         }
     }
 
-    void loadRuntimeAssets() {
-        char* corpusEnvironment = nullptr;
-        std::size_t corpusEnvironmentLength = 0;
-        const errno_t environmentResult = _dupenv_s(&corpusEnvironment, &corpusEnvironmentLength, "RA2YR_CORPUS_ROOT");
-        if (environmentResult != 0 || corpusEnvironment == nullptr || corpusEnvironmentLength == 0) {
-            std::free(corpusEnvironment);
-            assetError_ = T("asset_missing");
-            std::cerr << "[Content][Error] RA2YR_CORPUS_ROOT is not set; real CONS.SHP is unavailable.\n";
-            return;
-        }
-        const std::filesystem::path root(corpusEnvironment);
-        std::free(corpusEnvironment);
-        const std::filesystem::path rulesPath = root / "extracted/ini/yr-1.001-patch/rulesmd.ini";
-        const std::filesystem::path alternateRulesPath = root / "rulesmd.ini";
-        std::string error;
-        if (!rules_.load(std::filesystem::exists(rulesPath) ? rulesPath : alternateRulesPath, error)) {
+    bool loadRuntimeAssets(std::string& error) {
+        const std::filesystem::path rulesPath = contentRoot_ / "INI/Rules.ini";
+        const std::filesystem::path artPath = contentRoot_ / "INI/Art.ini";
+        const std::filesystem::path spritePath = contentRoot_ / "assets/game/ra2/infantry/CONS.SHP";
+        const std::filesystem::path palettePath = contentRoot_ / "assets/game/ra2/palettes/unittem.pal";
+        if (!rules_.load(rulesPath, error) || !art_.load(artPath, error) ||
+            !palette_.load(palettePath, error) || !sprite_.load(spritePath, error) ||
+            !renderer_.loadPalette("unittem", palette_, error) ||
+            !renderer_.loadSpriteAsset("CONS", sprite_, error)) {
             assetError_ = utf8ToWide(error);
             std::cerr << "[Content][Error] " << error << '\n';
-            return;
+            return false;
         }
-        const std::filesystem::path spritePath = root / "extracted/leaf/ra2.mix/conquer.mix/cons.shp";
-        const std::filesystem::path palettePath = root / "extracted/leaf/ra2.mix/cache.mix/unittem.pal";
-        if (!palette_.load(palettePath, error) || !sprite_.load(spritePath, error)) {
-            assetError_ = utf8ToWide(error);
-            std::cerr << "[Content][Error] " << error << '\n';
-            return;
+        const std::pair<std::string, std::filesystem::path> images[] = {
+            {"ui.main.background", contentRoot_ / "assets/ui/ra2/mainmenu/crt_console.png"},
+            {"ui.main.button", contentRoot_ / "assets/ui/ra2/mainmenu/button.png"},
+            {"ui.main.button_hover", contentRoot_ / "assets/ui/ra2/mainmenu/button_hover.png"},
+            {"ui.hud.leftbar", contentRoot_ / "assets/ui/dta/hud/leftbar.png"},
+            {"ui.hud.rightbar", contentRoot_ / "assets/ui/dta/hud/rightbar.png"},
+            {"ui.hud.button", contentRoot_ / "assets/ui/dta/hud/160pxbtn.png"},
+            {"ui.hud.button_hover", contentRoot_ / "assets/ui/dta/hud/160pxbtn_c.png"},
+            {"ui.hud.tab", contentRoot_ / "assets/ui/dta/hud/133pxtab.png"},
+            {"ui.hud.tab_hover", contentRoot_ / "assets/ui/dta/hud/133pxtab_c.png"},
+            {"ui.hud.ability", contentRoot_ / "assets/ui/dta/hud/slocindicator.png"},
+        };
+        for (const auto& [id, path] : images) {
+            if (!renderer_.loadTexture(id, path, error)) {
+                assetError_ = utf8ToWide(error);
+                std::cerr << "[Content][Error] " << error << '\n';
+                return false;
+            }
         }
         assetReady_ = true;
-        std::cerr << "[Content] Loaded effective rulesmd.ini, CONS.SHP and unittem.pal\n";
+        std::cerr << "[Content] Loaded project Rules.ini, Art.ini, CONS.SHP and unittem.pal\n";
+        std::cerr << "[Content] Runtime root: " << contentRoot_.string() << '\n';
+        return true;
+    }
+
+    bool buildTerrain(std::string& error) {
+        std::vector<renderer::TerrainTileVisual> tiles;
+        for (int x = 0; x < 64; ++x) {
+            for (int y = 0; y < 64; ++y) {
+                const ScreenCoord center = gridToScreen({static_cast<float>(x), static_cast<float>(y)});
+                if (center.x < 80.0F || center.x > 1510.0F || center.y < 30.0F || center.y > 870.0F) {
+                    continue;
+                }
+                const bool alternate = ((x + y) & 1) != 0;
+                tiles.push_back({center, kTileWidth, kTileHeight,
+                    alternate ? Color{0.10F, 0.25F, 0.14F, 1.0F} : Color{0.08F, 0.21F, 0.12F, 1.0F},
+                    {0.18F, 0.38F, 0.20F, 0.70F}});
+            }
+        }
+        terrainTileCount_ = tiles.size();
+        renderer_.buildStaticTerrain(tiles, error);
+        return error.empty();
     }
 
     std::wstring T(const std::string& key) const {
@@ -250,6 +322,16 @@ private:
     }
 
     void processKey(SDL_Keycode key) {
+        if (key == SDLK_F3) {
+            performance_.showOverlay = !performance_.showOverlay;
+            return;
+        }
+        if (key == SDLK_F4) {
+            renderer_.toggleVSync();
+            toast_ = renderer_.vsyncEnabled() ? L"VSYNC ON" : L"VSYNC OFF";
+            toastTime_ = 2.0F;
+            return;
+        }
         if (mode_ == AppMode::MainMenu) {
             if (key == SDLK_ESCAPE) {
                 running_ = false;
@@ -372,8 +454,6 @@ private:
         }
         const Rect card{1518.0F, 850.0F, 382.0F, 188.0F};
         if (card.contains(mouse_.x, mouse_.y)) {
-            const float cellWidth = 72.0F;
-            const float cellHeight = 54.0F;
             const int column = static_cast<int>((mouse_.x - card.x) / 76.0F);
             const int row = static_cast<int>((mouse_.y - card.y) / 58.0F);
             if (column >= 0 && column < 5 && row >= 0 && row < 3) {
@@ -382,21 +462,15 @@ private:
                     pendingAction_ = PendingAction::Move;
                 } else if (slot == 1) {
                     simulation_->issueStop();
-                } else if (slot == 2 || slot == 6) {
+                } else if (slot == 2) {
                     simulation_->issueHold();
                 } else if (slot == 3) {
-                    pendingAction_ = PendingAction::Attack;
+                    pendingAction_ = PendingAction::Patrol;
                 } else if (slot == 4 || slot == 9) {
                     pendingAction_ = PendingAction::AttackMove;
-                } else if (slot == 5) {
-                    pendingAction_ = PendingAction::Patrol;
-                } else if (slot == 8) {
-                    pendingAction_ = PendingAction::Move;
                 }
                 return true;
             }
-            (void)cellWidth;
-            (void)cellHeight;
         }
         return false;
     }
@@ -461,66 +535,82 @@ private:
             renderer_.drawBorder({690.0F, 968.0F, 540.0F, 54.0F}, {0.85F, 0.18F, 0.04F, 1.0F});
             renderer_.drawText(toast_, {700.0F, 974.0F, 520.0F, 42.0F}, 22, {1.0F, 0.82F, 0.18F, 1.0F});
         }
+        if (performance_.showOverlay) {
+            renderPerformanceOverlay();
+        }
         renderer_.present();
     }
 
-    void renderMainMenu() {
-        renderer_.drawRect({0.0F, 0.0F, kLogicalWidth, kLogicalHeight}, {0.0F, 0.0F, 0.0F, 1.0F});
-        const Rect monitor{420.0F, 118.0F, 910.0F, 720.0F};
-        renderer_.drawRect(monitor, {0.18F, 0.20F, 0.22F, 1.0F});
-        renderer_.drawBorder(monitor, {0.70F, 0.73F, 0.76F, 1.0F}, 5.0F);
-        const Rect screen{470.0F, 160.0F, 810.0F, 630.0F};
-        renderer_.drawRect(screen, {0.015F, 0.0F, 0.0F, 1.0F});
-        renderer_.drawBorder(screen, {0.28F, 0.02F, 0.02F, 1.0F}, 4.0F);
-        const ScreenCoord center{875.0F, 474.0F};
-        for (int radius = 90; radius <= 300; radius += 70) {
-            for (int segment = 0; segment < 36; ++segment) {
-                const float first = static_cast<float>(segment) * 6.2831853F / 36.0F;
-                const float second = static_cast<float>(segment + 1) * 6.2831853F / 36.0F;
-                renderer_.drawLine({center.x + std::cos(first) * radius, center.y + std::sin(first) * radius * 0.78F},
-                    {center.x + std::cos(second) * radius, center.y + std::sin(second) * radius * 0.78F},
-                    {0.42F, 0.01F, 0.01F, 0.8F}, 2.0F);
-            }
-        }
-        renderer_.drawLine({center.x - 360.0F, center.y}, {center.x + 360.0F, center.y}, {0.5F, 0.01F, 0.01F, 0.8F}, 2.0F);
-        renderer_.drawLine({center.x, center.y - 280.0F}, {center.x, center.y + 280.0F}, {0.5F, 0.01F, 0.01F, 0.8F}, 2.0F);
-        renderer_.drawText(T("title"), {520.0F, 392.0F, 710.0F, 65.0F}, 50, {0.95F, 0.72F, 0.22F, 1.0F});
-        renderer_.drawText(L"COMMAND & CONQUER", {520.0F, 348.0F, 710.0F, 38.0F}, 23, {0.9F, 0.9F, 0.84F, 1.0F});
-        renderer_.drawText(T("subtitle"), {510.0F, 705.0F, 730.0F, 34.0F}, 18, {0.8F, 0.18F, 0.12F, 1.0F});
+    static std::wstring formatNumber(float value, int precision = 1) {
+        std::wostringstream stream;
+        stream << std::fixed << std::setprecision(precision) << value;
+        return stream.str();
+    }
 
-        const Rect panel{1445.0F, 88.0F, 425.0F, 865.0F};
-        renderer_.drawRect(panel, {0.035F, 0.04F, 0.045F, 0.98F});
-        renderer_.drawBorder(panel, {0.42F, 0.45F, 0.48F, 1.0F}, 5.0F);
-        renderer_.drawBorder({1460.0F, 103.0F, 395.0F, 835.0F}, {0.60F, 0.30F, 0.08F, 1.0F}, 2.0F);
+    void recordPerformance(float frameMs, float simulationMs, float renderMs) {
+        performance_.frameTimeMs = frameMs;
+        performance_.simulationTimeMs = simulationMs;
+        performance_.renderCpuTimeMs = renderMs;
+        performance_.recentFrameTimesMs.push_back(frameMs);
+        while (performance_.recentFrameTimesMs.size() > 180) {
+            performance_.recentFrameTimesMs.pop_front();
+        }
+        if (performance_.recentFrameTimesMs.empty()) {
+            return;
+        }
+        float totalMs = 0.0F;
+        for (const float sample : performance_.recentFrameTimesMs) {
+            totalMs += sample;
+        }
+        const float averageFrameMs = totalMs / static_cast<float>(performance_.recentFrameTimesMs.size());
+        performance_.averageFps = averageFrameMs > 0.0F ? 1000.0F / averageFrameMs : 0.0F;
+        std::vector<float> sorted(performance_.recentFrameTimesMs.begin(), performance_.recentFrameTimesMs.end());
+        std::sort(sorted.begin(), sorted.end());
+        const std::size_t p95Index = std::min(sorted.size() - 1,
+            static_cast<std::size_t>(std::ceil(static_cast<float>(sorted.size()) * 0.95F)) - 1U);
+        performance_.p95FrameTimeMs = sorted[p95Index];
+    }
+
+    void renderPerformanceOverlay() {
+        const auto& renderStats = renderer_.statistics();
+        renderer_.drawRect({24.0F, 62.0F, 460.0F, 142.0F}, {0.01F, 0.02F, 0.025F, 0.92F});
+        renderer_.drawBorder({24.0F, 62.0F, 460.0F, 142.0F}, {0.35F, 0.80F, 0.55F, 0.95F}, 2.0F);
+        renderer_.drawText(L"PERFORMANCE [F3] / VSYNC [F4]", {42.0F, 72.0F, 420.0F, 24.0F}, 17,
+            {0.45F, 1.0F, 0.60F, 1.0F}, false);
+        renderer_.drawText(L"FPS " + formatNumber(performance_.averageFps) + L"   FRAME " +
+            formatNumber(performance_.frameTimeMs) + L" ms   P95 " + formatNumber(performance_.p95FrameTimeMs) + L" ms",
+            {42.0F, 102.0F, 420.0F, 24.0F}, 15, {0.85F, 0.90F, 0.88F, 1.0F}, false);
+        renderer_.drawText(L"SIM " + formatNumber(performance_.simulationTimeMs) + L" ms   RENDER " +
+            formatNumber(performance_.renderCpuTimeMs) + L" ms   DRAWS " + std::to_wstring(renderStats.drawCalls),
+            {42.0F, 128.0F, 420.0F, 24.0F}, 15, {0.85F, 0.90F, 0.88F, 1.0F}, false);
+        renderer_.drawText(L"TILES " + std::to_wstring(renderStats.visibleTiles) + L"   ENTITIES " +
+            std::to_wstring(renderStats.visibleEntities) + L"   LAYOUTS " +
+            std::to_wstring(renderStats.textLayoutUpdates) + L"   UPLOADS " +
+            std::to_wstring(renderStats.textureUploadCount), {42.0F, 154.0F, 420.0F, 24.0F}, 15,
+            {0.85F, 0.90F, 0.88F, 1.0F}, false);
+    }
+
+    void renderMainMenu() {
+        renderer_.drawImage("ui.main.background", {0.0F, 0.0F, kLogicalWidth, kLogicalHeight});
+        renderer_.drawText(T("title"), {275.0F, 430.0F, 1040.0F, 72.0F}, 48, {1.0F, 0.84F, 0.34F, 1.0F});
+        renderer_.drawText(T("subtitle"), {300.0F, 505.0F, 990.0F, 92.0F}, 68, {1.0F, 0.28F, 0.10F, 1.0F});
+        renderer_.drawText(L"RA2YR-BYCPP  //  MAIN CONTROL", {420.0F, 625.0F, 750.0F, 34.0F}, 20, {0.86F, 0.62F, 0.28F, 1.0F});
         for (std::size_t i = 0; i < menuButtons_.size(); ++i) {
             const MenuButton& button = menuButtons_[i];
             const bool hovered = button.rect.contains(mouse_.x, mouse_.y);
             const bool pressed = pressedMenuButton_ == static_cast<int>(i);
-            renderer_.drawRect(button.rect, pressed ? Color{0.38F, 0.03F, 0.02F, 1.0F} : hovered ?
-                Color{0.20F, 0.08F, 0.03F, 1.0F} : Color{0.045F, 0.045F, 0.05F, 1.0F});
-            renderer_.drawBorder(button.rect, hovered ? Color{1.0F, 0.45F, 0.08F, 1.0F} : Color{0.58F, 0.36F, 0.16F, 1.0F}, 2.0F);
-            renderer_.drawText(T(button.key), {button.rect.x + 5.0F, button.rect.y + 2.0F, button.rect.width - 10.0F, button.rect.height - 4.0F},
-                25, {1.0F, 0.84F, 0.18F, 1.0F});
+            renderer_.drawImage(pressed || hovered ? button.hoverImage : button.image, button.rect,
+                pressed ? Color{0.80F, 0.80F, 0.80F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
+            renderer_.drawText(T(button.key), button.rect, 24, {1.0F, 0.86F, 0.20F, 1.0F});
         }
-        renderer_.drawText(L"DTA-INSPIRED CLIENT SHELL", {40.0F, 1002.0F, 520.0F, 28.0F}, 16, {0.55F, 0.55F, 0.58F, 1.0F}, false);
-        renderer_.drawText(L"C++23 / SDL3 / DIRECT3D 11", {40.0F, 1032.0F, 520.0F, 28.0F}, 16, {0.55F, 0.55F, 0.58F, 1.0F}, false);
+        renderer_.drawText(L"RED COMMAND CONSOLE  //  C++23 / SDL3 / D3D11", {94.0F, 1008.0F, 980.0F, 28.0F}, 16, {0.72F, 0.34F, 0.18F, 1.0F}, false);
     }
 
     void renderEditor() {
+        renderer_.setWorldStats(terrainTileCount_, simulation_->entities().size());
         renderer_.drawRect({0.0F, 0.0F, kLogicalWidth, kLogicalHeight}, {0.008F, 0.012F, 0.018F, 1.0F});
         renderer_.drawRect({100.0F, 50.0F, 1390.0F, 780.0F}, {0.04F, 0.07F, 0.05F, 1.0F});
-        for (int x = 0; x < 64; ++x) {
-            for (int y = 0; y < 64; ++y) {
-                const ScreenCoord center = gridToScreen({static_cast<float>(x), static_cast<float>(y)});
-                if (center.x < 80.0F || center.x > 1510.0F || center.y < 30.0F || center.y > 870.0F) {
-                    continue;
-                }
-                const bool alternate = ((x + y) & 1) != 0;
-                renderer_.drawDiamond(center, kTileWidth, kTileHeight,
-                    alternate ? Color{0.10F, 0.25F, 0.14F, 1.0F} : Color{0.08F, 0.21F, 0.12F, 1.0F},
-                    {0.18F, 0.38F, 0.20F, 0.70F});
-            }
-        }
+        renderer_.drawStaticTerrain();
         renderer_.drawBorder({100.0F, 50.0F, 1390.0F, 780.0F}, {0.65F, 0.48F, 0.18F, 1.0F}, 3.0F);
 
         for (const auto& entity : simulation_->entities()) {
@@ -529,7 +619,8 @@ private:
             }
             const ScreenCoord position = gridToScreen(entity.position);
             if (assetReady_) {
-                renderer_.drawSprite(sprite_.frame(static_cast<std::size_t>(simulation_->animationFrame())), palette_, entity.owner, position, 0.72F);
+                renderer_.drawSprite(rules_.e2().image, "unittem", static_cast<std::size_t>(art_.frameIndex(
+                    rules_.e2().image, "Walk", simulation_->animationFrame())), entity.owner, position, 0.72F);
             }
             if (entity.selected) {
                 renderer_.drawBorder({position.x - 22.0F, position.y - 8.0F, 44.0F, 16.0F}, {0.95F, 0.85F, 0.25F, 1.0F}, 2.0F);
@@ -541,34 +632,35 @@ private:
         }
 
         renderer_.drawRect({0.0F, 105.0F, 94.0F, 670.0F}, {0.025F, 0.035F, 0.045F, 0.98F});
+        renderer_.drawImage("ui.hud.leftbar", {0.0F, 105.0F, 24.0F, 670.0F});
+        renderer_.drawImage("ui.hud.leftbar", {70.0F, 105.0F, 24.0F, 670.0F});
         renderer_.drawBorder({8.0F, 114.0F, 78.0F, 650.0F}, {0.64F, 0.42F, 0.16F, 1.0F}, 2.0F);
         renderer_.drawText(T("strategic"), {12.0F, 128.0F, 70.0F, 40.0F}, 15, {1.0F, 0.82F, 0.20F, 1.0F});
         for (int i = 0; i < 5; ++i) {
             const Rect ability{18.0F, 184.0F + i * 106.0F, 58.0F, 86.0F};
-            renderer_.drawRect(ability, {0.04F, 0.05F, 0.06F, 1.0F});
-            renderer_.drawBorder(ability, {0.42F, 0.20F, 0.08F, 1.0F}, 2.0F);
-            renderer_.drawText(L"◆", {ability.x, ability.y + 12.0F, ability.width, 34.0F}, 24, {0.9F, 0.12F, 0.08F, 1.0F});
+            renderer_.drawImage("ui.hud.button", ability);
+            renderer_.drawImage("ui.hud.ability", {ability.x + 4.0F, ability.y + 4.0F, 50.0F, 50.0F});
             renderer_.drawText(std::to_wstring(i + 1), {ability.x, ability.y + 48.0F, ability.width, 22.0F}, 14, {0.8F, 0.78F, 0.45F, 1.0F});
         }
 
         const Rect side{1500.0F, 40.0F, 420.0F, 785.0F};
         renderer_.drawRect(side, {0.025F, 0.03F, 0.04F, 0.98F});
+        renderer_.drawImage("ui.hud.leftbar", {1500.0F, 40.0F, 24.0F, 785.0F});
+        renderer_.drawImage("ui.hud.rightbar", {1896.0F, 40.0F, 24.0F, 785.0F});
         renderer_.drawBorder(side, {0.75F, 0.55F, 0.18F, 1.0F}, 4.0F);
         renderer_.drawText(L"10000", {1630.0F, 45.0F, 155.0F, 36.0F}, 28, {1.0F, 0.84F, 0.20F, 1.0F});
         renderer_.drawText(T("production"), {1520.0F, 120.0F, 370.0F, 30.0F}, 20, {0.95F, 0.78F, 0.22F, 1.0F});
         const std::string tabs[] = {"building", "defense", "infantry", "vehicles"};
         for (int i = 0; i < 4; ++i) {
             const Rect tab{1520.0F + i * 96.0F, 158.0F, 88.0F, 42.0F};
-            renderer_.drawRect(tab, i == activeTab_ ? Color{0.30F, 0.11F, 0.04F, 1.0F} : Color{0.05F, 0.06F, 0.07F, 1.0F});
-            renderer_.drawBorder(tab, {0.72F, 0.44F, 0.12F, 1.0F}, 2.0F);
+            renderer_.drawImage(i == activeTab_ ? "ui.hud.tab_hover" : "ui.hud.tab", tab);
             renderer_.drawText(T(tabs[i]), tab, 17, {1.0F, 0.82F, 0.20F, 1.0F});
         }
         for (int i = 0; i < 12; ++i) {
             const int column = i % 3;
             const int row = i / 3;
             const Rect product{1528.0F + column * 122.0F, 220.0F + row * 95.0F, 108.0F, 80.0F};
-            renderer_.drawRect(product, {0.035F, 0.04F, 0.05F, 1.0F});
-            renderer_.drawBorder(product, {0.22F, 0.24F, 0.27F, 1.0F}, 2.0F);
+            renderer_.drawImage("ui.hud.button", product);
             renderer_.drawText(L"--", {product.x, product.y + 12.0F, product.width, 28.0F}, 24, {0.42F, 0.44F, 0.48F, 1.0F});
         }
         renderer_.drawText(T("red"), {1510.0F, 70.0F, 190.0F, 46.0F}, 19, {1.0F, 0.30F, 0.18F, 1.0F});
@@ -582,9 +674,10 @@ private:
         renderer_.drawText(selected == nullptr ? L"OWNER --" : T("owner") + L": " + ownerText(selected->owner), {140.0F, 906.0F, 520.0F, 28.0F}, 19, {0.8F, 0.8F, 0.74F, 1.0F}, false);
         if (selected != nullptr) {
             renderer_.drawText(T("health") + L": " + std::to_wstring(selected->health) + L" / " + std::to_wstring(selected->maxHealth), {140.0F, 940.0F, 520.0F, 28.0F}, 19, {0.36F, 1.0F, 0.36F, 1.0F}, false);
-            renderer_.drawText(T("weapon") + L": M1Carbine   " + T("armor") + L": " + utf8ToWide(rules_.e2().armor), {140.0F, 974.0F, 720.0F, 28.0F}, 18, {0.72F, 0.75F, 0.82F, 1.0F}, false);
+            renderer_.drawText(T("weapon") + L": M1Carbine   " + T("armor") + L": " + utf8ToWide(rules_.e2().armorType), {140.0F, 974.0F, 720.0F, 28.0F}, 18, {0.72F, 0.75F, 0.82F, 1.0F}, false);
             if (assetReady_) {
-                renderer_.drawSprite(sprite_.frame(static_cast<std::size_t>(simulation_->animationFrame())), palette_, selected->owner, {1145.0F, 965.0F}, 0.95F);
+                renderer_.drawSprite(rules_.e2().image, "unittem", static_cast<std::size_t>(art_.frameIndex(
+                    rules_.e2().image, "Ready", 0)), selected->owner, {1145.0F, 965.0F}, 0.95F);
             }
         }
         renderer_.drawText(T("runtime"), {860.0F, 1026.0F, 440.0F, 24.0F}, 15, {0.3F, 0.9F, 0.4F, 1.0F});
@@ -594,15 +687,16 @@ private:
         const Rect card{1518.0F, 850.0F, 382.0F, 188.0F};
         renderer_.drawRect(card, {0.018F, 0.022F, 0.028F, 1.0F});
         renderer_.drawBorder(card, {0.75F, 0.50F, 0.16F, 1.0F}, 3.0F);
-        const std::string commandKeys[] = {"move", "stop", "guard", "attack", "attack_move", "patrol", "hold", "repair", "waypoint", "deploy", "settings", "building", "defense", "infantry", "vehicles"};
+        const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "", "", "", "", "", "", "", "", "", ""};
         for (int slot = 0; slot < 15; ++slot) {
             const int column = slot % 5;
             const int row = slot / 5;
             const Rect button{1523.0F + column * 76.0F, 855.0F + row * 58.0F, 72.0F, 54.0F};
             const bool hot = button.contains(mouse_.x, mouse_.y);
-            renderer_.drawRect(button, hot ? Color{0.28F, 0.10F, 0.03F, 1.0F} : Color{0.055F, 0.06F, 0.07F, 1.0F});
-            renderer_.drawBorder(button, hot ? Color{1.0F, 0.48F, 0.12F, 1.0F} : Color{0.48F, 0.35F, 0.16F, 1.0F}, 2.0F);
-            renderer_.drawText(T(commandKeys[slot]), button, 14, {1.0F, 0.84F, 0.26F, 1.0F});
+            renderer_.drawImage(hot ? "ui.hud.button_hover" : "ui.hud.button", button);
+            if (!commandKeys[slot].empty()) {
+                renderer_.drawText(T(commandKeys[slot]), button, 14, {1.0F, 0.84F, 0.26F, 1.0F});
+            }
         }
         renderer_.drawText(T("editor_title"), {116.0F, 10.0F, 320.0F, 30.0F}, 21, {1.0F, 0.82F, 0.20F, 1.0F}, false);
         renderer_.drawText(T("editor_hint"), {410.0F, 10.0F, 1260.0F, 30.0F}, 15, {0.65F, 0.68F, 0.70F, 1.0F}, false);
@@ -635,12 +729,15 @@ private:
     SDL_Window* window_ = nullptr;
     renderer::D3D11Renderer renderer_;
     gamedata::RulesDatabase rules_;
+    gamedata::ArtDatabase art_;
     westwood::Palette palette_;
     westwood::ShpTsDocument sprite_;
     std::unique_ptr<simulation::Simulation> simulation_;
     std::unordered_map<std::string, std::wstring> strings_;
     std::wstring assetError_;
     std::wstring toast_;
+    std::filesystem::path contentRoot_;
+    PerformanceTracker performance_;
     AppMode mode_ = AppMode::MainMenu;
     PendingAction pendingAction_ = PendingAction::None;
     Owner placingOwner_ = Owner::Red;
@@ -655,26 +752,33 @@ private:
     ScreenCoord dragStart_{};
     ScreenCoord dragEnd_{};
     IsoProjection projection_{kTileWidth, kTileHeight, {790.0F, 440.0F}};
+    std::size_t terrainTileCount_ = 0;
     std::vector<MenuButton> menuButtons_ = {
-        {"campaign", {1490.0F, 175.0F, 335.0F, 62.0F}},
-        {"load", {1490.0F, 250.0F, 335.0F, 62.0F}},
-        {"skirmish", {1490.0F, 325.0F, 335.0F, 62.0F}},
-        {"online", {1490.0F, 400.0F, 335.0F, 62.0F}},
-        {"lan", {1490.0F, 475.0F, 335.0F, 62.0F}},
-        {"settings", {1490.0F, 550.0F, 335.0F, 62.0F}},
-        {"statistics", {1490.0F, 625.0F, 335.0F, 62.0F}},
-        {"editor", {1490.0F, 700.0F, 335.0F, 62.0F}},
-        {"exit", {1490.0F, 775.0F, 335.0F, 62.0F}},
+        {"campaign", "ui.main.button", "ui.main.button_hover", {1500.0F, 166.0F, 335.0F, 76.0F}},
+        {"load", "ui.main.button", "ui.main.button_hover", {1500.0F, 250.0F, 335.0F, 76.0F}},
+        {"skirmish", "ui.main.button", "ui.main.button_hover", {1500.0F, 334.0F, 335.0F, 76.0F}},
+        {"online", "ui.main.button", "ui.main.button_hover", {1500.0F, 418.0F, 335.0F, 76.0F}},
+        {"lan", "ui.main.button", "ui.main.button_hover", {1500.0F, 502.0F, 335.0F, 76.0F}},
+        {"settings", "ui.main.button", "ui.main.button_hover", {1500.0F, 586.0F, 335.0F, 76.0F}},
+        {"statistics", "ui.main.button", "ui.main.button_hover", {1500.0F, 670.0F, 335.0F, 76.0F}},
+        {"editor", "ui.main.button", "ui.main.button_hover", {1500.0F, 754.0F, 335.0F, 76.0F}},
+        {"exit", "ui.main.button", "ui.main.button_hover", {1500.0F, 838.0F, 335.0F, 76.0F}},
     };
 };
 
 } // namespace
 } // namespace ra2yr::client
 
-int main() {
+int main(int argc, char** argv) {
     ra2yr::client::ClientApp app;
     std::string error;
-    if (!app.initialize(error)) {
+    bool stressEntities = false;
+    for (int index = 1; index < argc; ++index) {
+        if (std::string(argv[index]) == "--stress-entities") {
+            stressEntities = true;
+        }
+    }
+    if (!app.initialize(error, stressEntities)) {
         std::cerr << "[Fatal] " << error << '\n';
         return 1;
     }

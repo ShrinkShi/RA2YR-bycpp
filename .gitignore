@@ -2,6 +2,7 @@
 /.vs/
 /.idea/
 CMakeUserPresets.json
+/artifacts/manual-validation/
 *.user
 *.suo
 *.pdb

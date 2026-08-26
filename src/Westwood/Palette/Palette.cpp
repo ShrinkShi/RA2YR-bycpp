@@ -7,6 +7,20 @@
 
 namespace ra2yr::westwood {
 
+PaletteColor Palette::remappedColor(std::uint8_t index, Owner owner) const {
+    PaletteColor result = colors_[index];
+    if (index < 0xc0U || index > 0xcfU) {
+        return result;
+    }
+    const float shade = 0.60F + static_cast<float>(index - 0xc0U) / 32.0F;
+    const PaletteColor ownerColor = owner == Owner::Red ? PaletteColor{255, 31, 20} :
+        owner == Owner::Blue ? PaletteColor{46, 140, 255} : PaletteColor{217, 217, 217};
+    result.r = static_cast<std::uint8_t>(std::clamp(ownerColor.r * shade, 0.0F, 255.0F));
+    result.g = static_cast<std::uint8_t>(std::clamp(ownerColor.g * shade, 0.0F, 255.0F));
+    result.b = static_cast<std::uint8_t>(std::clamp(ownerColor.b * shade, 0.0F, 255.0F));
+    return result;
+}
+
 bool Palette::load(const std::filesystem::path& path, std::string& error) {
     std::ifstream stream(path, std::ios::binary);
     if (!stream) {

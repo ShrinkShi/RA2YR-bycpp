@@ -6,7 +6,6 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Get-RepoRoot
 $environment = Initialize-DeveloperEnvironment $repoRoot
-[void](Resolve-CorpusRoot $repoRoot)
 
 if ($Clean) { Remove-FailedBuildCache $repoRoot }
 Invoke-Configure $environment

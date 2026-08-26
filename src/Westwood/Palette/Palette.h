@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Engine/Core/Types.h"
+
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -17,6 +19,7 @@ class Palette {
 public:
     bool load(const std::filesystem::path& path, std::string& error);
     [[nodiscard]] PaletteColor color(std::uint8_t index) const { return colors_[index]; }
+    [[nodiscard]] PaletteColor remappedColor(std::uint8_t index, Owner owner) const;
 
 private:
     std::array<PaletteColor, 256> colors_{};

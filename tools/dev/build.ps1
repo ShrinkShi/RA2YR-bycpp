@@ -4,7 +4,6 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Get-RepoRoot
 $environment = Initialize-DeveloperEnvironment $repoRoot
-[void](Resolve-CorpusRoot $repoRoot)
 $cache = Join-Path (Get-BuildRoot $repoRoot) "CMakeCache.txt"
 if (-not (Test-Path -LiteralPath $cache)) {
     Invoke-Configure $environment
