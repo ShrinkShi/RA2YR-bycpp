@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <cmath>
 
@@ -22,6 +23,20 @@ struct ScreenCoord {
     float y = 0.0F;
 };
 
+// Direction order is screen-space North, then counter-clockwise around the
+// compass.  Art assets can map this stable engine order to their own facing
+// indices through Art.ini.
+enum class Direction8 : std::uint8_t {
+    North,
+    NorthWest,
+    West,
+    SouthWest,
+    South,
+    SouthEast,
+    East,
+    NorthEast,
+};
+
 enum class TerrainType : std::uint8_t {
     Grass,
 };
@@ -37,16 +52,68 @@ struct IsoProjection {
     float tileHeight = 22.0F;
     ScreenCoord origin{790.0F, 440.0F};
 
+    [[nodiscard]] ScreenCoord toScreenVector(WorldCoord coord) const {
+        return {(coord.x - coord.y) * tileWidth * 0.5F,
+            (coord.x + coord.y) * tileHeight * 0.5F};
+    }
+
+    [[nodiscard]] WorldCoord toWorldVector(ScreenCoord screen) const {
+        const float horizontal = screen.x / (tileWidth * 0.5F);
+        const float vertical = screen.y / (tileHeight * 0.5F);
+        return {(horizontal + vertical) * 0.5F,
+            (vertical - horizontal) * 0.5F};
+    }
+
     [[nodiscard]] ScreenCoord toScreen(WorldCoord coord) const {
-        return {origin.x + (coord.x - coord.y) * tileWidth * 0.5F,
-            origin.y + (coord.x + coord.y) * tileHeight * 0.5F};
+        const ScreenCoord vector = toScreenVector(coord);
+        return {origin.x + vector.x, origin.y + vector.y};
     }
 
     [[nodiscard]] GridCoord toGrid(ScreenCoord screen) const {
-        const float horizontal = (screen.x - origin.x) / (tileWidth * 0.5F);
-        const float vertical = (screen.y - origin.y) / (tileHeight * 0.5F);
-        return {static_cast<int>(std::lround((horizontal + vertical) * 0.5F)),
-            static_cast<int>(std::lround((vertical - horizontal) * 0.5F))};
+        const WorldCoord world = toWorldVector({screen.x - origin.x, screen.y - origin.y});
+        return {static_cast<int>(std::lround(world.x)), static_cast<int>(std::lround(world.y))};
+    }
+};
+
+struct IsometricCamera {
+    IsoProjection projection{44.0F, 22.0F, {0.0F, 0.0F}};
+    WorldCoord worldCenter{};
+    ScreenCoord viewportCenter{795.0F, 440.0F};
+    float zoom = 1.0F;
+    float minZoom = 0.5F;
+    float maxZoom = 2.0F;
+
+    [[nodiscard]] ScreenCoord toScreen(WorldCoord world) const {
+        const ScreenCoord vector = projection.toScreenVector({
+            world.x - worldCenter.x, world.y - worldCenter.y});
+        return {viewportCenter.x + vector.x * zoom, viewportCenter.y + vector.y * zoom};
+    }
+
+    [[nodiscard]] WorldCoord toWorld(ScreenCoord screen) const {
+        const ScreenCoord vector{
+            (screen.x - viewportCenter.x) / zoom,
+            (screen.y - viewportCenter.y) / zoom};
+        const WorldCoord relative = projection.toWorldVector(vector);
+        return {worldCenter.x + relative.x, worldCenter.y + relative.y};
+    }
+
+    [[nodiscard]] GridCoord toGrid(ScreenCoord screen) const {
+        const WorldCoord world = toWorld(screen);
+        return {static_cast<int>(std::lround(world.x)), static_cast<int>(std::lround(world.y))};
+    }
+
+    // A positive screen delta moves the camera in that direction, so the
+    // world content moves opposite to the cursor edge.
+    void panScreen(ScreenCoord delta) {
+        worldCenter = toWorld({viewportCenter.x + delta.x, viewportCenter.y + delta.y});
+    }
+
+    void zoomAt(ScreenCoord cursor, float factor) {
+        const WorldCoord before = toWorld(cursor);
+        zoom = std::clamp(zoom * factor, minZoom, maxZoom);
+        const WorldCoord after = toWorld(cursor);
+        worldCenter.x += before.x - after.x;
+        worldCenter.y += before.y - after.y;
     }
 };
 

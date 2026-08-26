@@ -11,6 +11,7 @@
 #include <dwrite.h>
 #include <wrl/client.h>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -22,7 +23,7 @@
 namespace ra2yr::renderer {
 
 struct TerrainTileVisual {
-    ScreenCoord center{};
+    WorldCoord center{};
     float width = 44.0F;
     float height = 22.0F;
     Color fill{};
@@ -40,12 +41,27 @@ struct RenderStatistics {
 
 struct SpriteFrameGPU {
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> indexedView;
+    float frameX = 0.0F;
+    float frameY = 0.0F;
+    float frameWidth = 0.0F;
+    float frameHeight = 0.0F;
+    float fullWidth = 0.0F;
+    float fullHeight = 0.0F;
+    // The SHP frame is cropped, but its x/y offset remains relative to the
+    // full canvas.  The bottom of the visible crop is the world ground pivot.
+    float pivotX = 0.0F;
+    float pivotY = 0.0F;
 };
 
 struct SpriteAsset {
     std::uint16_t width = 0;
     std::uint16_t height = 0;
     std::vector<SpriteFrameGPU> frames;
+};
+
+struct PaletteGPU {
+    Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> texture;
+    std::array<std::array<westwood::PaletteColor, 16>, 3> houseColorRemap{};
 };
 
 class SpriteCache {
@@ -77,6 +93,8 @@ public:
     bool loadSpriteAsset(std::string_view assetId, const westwood::ShpTsDocument& source, std::string& error);
 
     void buildStaticTerrain(const std::vector<TerrainTileVisual>& tiles, std::string& error);
+    void setWorldCamera(WorldCoord worldCenter, float zoom, ScreenCoord viewportCenter,
+        float tileWidth, float tileHeight);
     void drawStaticTerrain();
     void drawImage(std::string_view assetId, Rect rect, Color tint = {1.0F, 1.0F, 1.0F, 1.0F});
     void drawRect(Rect rect, Color color);
@@ -85,6 +103,8 @@ public:
     void drawDiamond(ScreenCoord center, float tileWidth, float tileHeight, Color color, Color edge);
     void drawSprite(std::string_view spriteAssetId, std::string_view paletteAssetId, std::size_t frameIndex,
         Owner owner, ScreenCoord center, float scale);
+    [[nodiscard]] Rect spriteBounds(std::string_view spriteAssetId, std::size_t frameIndex,
+        ScreenCoord ground, float scale) const;
     void drawText(std::wstring text, Rect rect, int size, Color color, bool centered = true);
 
     void setWorldStats(std::size_t visibleTiles, std::size_t visibleEntities);
@@ -143,6 +163,7 @@ private:
     Microsoft::WRL::ComPtr<IDXGISwapChain> swapChain_;
     Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTarget_;
     Microsoft::WRL::ComPtr<ID3D11VertexShader> vertexShader_;
+    Microsoft::WRL::ComPtr<ID3D11VertexShader> worldVertexShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> solidPixelShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> texturePixelShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> indexedSpritePixelShader_;
@@ -150,6 +171,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11Buffer> vertexBuffer_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> terrainVertexBuffer_;
     Microsoft::WRL::ComPtr<ID3D11Buffer> spriteConstantsBuffer_;
+    Microsoft::WRL::ComPtr<ID3D11Buffer> worldConstantsBuffer_;
     Microsoft::WRL::ComPtr<ID3D11BlendState> blendState_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> samplerState_;
     Microsoft::WRL::ComPtr<ID3D11SamplerState> pointSamplerState_;
@@ -161,10 +183,15 @@ private:
     std::unordered_map<std::wstring, Microsoft::WRL::ComPtr<IDWriteTextLayout>> textLayouts_;
 
     std::unordered_map<std::string, Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> imageTextures_;
-    std::unordered_map<std::string, Microsoft::WRL::ComPtr<ID3D11ShaderResourceView>> paletteTextures_;
+    std::unordered_map<std::string, PaletteGPU> paletteTextures_;
     SpriteCache spriteCache_;
 
     std::size_t terrainVertexCount_ = 0;
+    WorldCoord worldCameraCenter_{};
+    ScreenCoord worldViewportCenter_{795.0F, 440.0F};
+    float worldCameraZoom_ = 1.0F;
+    float worldTileWidth_ = 44.0F;
+    float worldTileHeight_ = 22.0F;
     std::vector<Vertex> solidVertices_;
     std::vector<TextItem> textItems_;
     RenderStatistics statistics_{};

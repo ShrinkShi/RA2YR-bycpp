@@ -7,6 +7,7 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -68,6 +69,9 @@ Inviso=yes
     assert(art.find("CONS") != nullptr);
     assert(art.find("CONS")->remapable);
     assert(art.facingCount("CONS") == 8);
+    assert(art.facingForDirection("CONS", 0) == 0);
+    assert(art.facingForDirection("CONS", 7) == 7);
+    assert(art.frameIndexForDirection("CONS", "Walk", 0, 5) == 8 + 5 * 6);
     assert(art.frameIndex("CONS", "Ready") == 0);
     assert(art.frameIndex("CONS", "Ready", 0, 7) == 7);
     assert(art.frameIndex("CONS", "Walk") == 8);
@@ -92,15 +96,37 @@ Inviso=yes
     westwood::ShpTsDocument projectShp;
     assert(projectShp.load(spritePath, error));
     assert(projectShp.width() == 76 && projectShp.height() == 96 && projectShp.frameCount() == 602);
+    assert(projectShp.frame(0).fullWidth == 76 && projectShp.frame(0).fullHeight == 96);
     westwood::Palette projectPalette;
     assert(projectPalette.load(palettePath, error));
-    assert(projectPalette.remappedColor(0xc0U, Owner::Red).r != projectPalette.remappedColor(0xc0U, Owner::Blue).r);
+    assert(projectPalette.remappedColor(16U, Owner::Red).r != projectPalette.remappedColor(16U, Owner::Blue).r);
+    assert(projectPalette.remappedColor(31U, Owner::Red).g != projectPalette.remappedColor(31U, Owner::Blue).g);
+    assert(projectPalette.remappedColor(0U, Owner::Red).r == projectPalette.color(0U).r);
 
     IsoProjection projection;
     for (const GridCoord coordinate : std::vector<GridCoord>{{0, 0}, {3, 7}, {24, 11}, {63, 63}}) {
         const GridCoord roundTrip = projection.toGrid(projection.toScreen({static_cast<float>(coordinate.x), static_cast<float>(coordinate.y)}));
         assert(roundTrip == coordinate);
     }
+    IsometricCamera camera;
+    camera.viewportCenter = {795.0F, 440.0F};
+    camera.worldCenter = {12.0F, 9.0F};
+    const ScreenCoord cameraPoint = camera.toScreen({15.0F, 11.0F});
+    const WorldCoord cameraRoundTrip = camera.toWorld(cameraPoint);
+    assert(std::abs(cameraRoundTrip.x - 15.0F) < 0.001F && std::abs(cameraRoundTrip.y - 11.0F) < 0.001F);
+    const ScreenCoord zoomCursor{920.0F, 520.0F};
+    const WorldCoord zoomBefore = camera.toWorld(zoomCursor);
+    camera.zoomAt(zoomCursor, 1.5F);
+    const WorldCoord zoomAfter = camera.toWorld(zoomCursor);
+    assert(std::abs(zoomBefore.x - zoomAfter.x) < 0.001F && std::abs(zoomBefore.y - zoomAfter.y) < 0.001F);
+    assert(simulation::Simulation::directionFromDelta(-1.0F, -1.0F) == Direction8::North);
+    assert(simulation::Simulation::directionFromDelta(-1.0F, 0.0F) == Direction8::NorthWest);
+    assert(simulation::Simulation::directionFromDelta(-1.0F, 1.0F) == Direction8::West);
+    assert(simulation::Simulation::directionFromDelta(0.0F, 1.0F) == Direction8::SouthWest);
+    assert(simulation::Simulation::directionFromDelta(1.0F, 1.0F) == Direction8::South);
+    assert(simulation::Simulation::directionFromDelta(1.0F, 0.0F) == Direction8::SouthEast);
+    assert(simulation::Simulation::directionFromDelta(1.0F, -1.0F) == Direction8::East);
+    assert(simulation::Simulation::directionFromDelta(0.0F, -1.0F) == Direction8::NorthEast);
 
     const std::filesystem::path syntheticShp = std::filesystem::temp_directory_path() / "ra2yr-core-test.shp";
     std::array<std::uint8_t, 36> shpBytes{};
@@ -148,6 +174,7 @@ Inviso=yes
     assert(moved->animationState == simulation::AnimationState::Walk ||
         moved->animationState == simulation::AnimationState::Idle);
     assert(moved->facing >= 0 && moved->facing < 8);
+    assert(moved->direction == Direction8::SouthEast);
 
     simulation.clearSelection();
     simulation.selectSingle({static_cast<int>(moved->position.x), static_cast<int>(moved->position.y)});

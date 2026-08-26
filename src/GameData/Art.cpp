@@ -23,6 +23,23 @@ bool parseInt(std::string value, int& result) {
     return ec == std::errc{} && ptr == value.data() + value.size();
 }
 
+bool parseFacingMap(std::string_view value, std::array<int, 8>& facingMap) {
+    std::stringstream stream{std::string(value)};
+    std::string token;
+    std::array<bool, 8> seen{};
+    int index = 0;
+    while (std::getline(stream, token, ',')) {
+        if (index >= static_cast<int>(facingMap.size()) || !parseInt(token, facingMap[index]) ||
+            facingMap[index] < 0 || facingMap[index] >= static_cast<int>(facingMap.size()) ||
+            seen[static_cast<std::size_t>(facingMap[index])]) {
+            return false;
+        }
+        seen[static_cast<std::size_t>(facingMap[index])] = true;
+        ++index;
+    }
+    return index == static_cast<int>(facingMap.size());
+}
+
 bool parseSequence(std::string_view value, AnimationSequence& sequence) {
     std::stringstream stream{std::string(value)};
     std::string token;
@@ -58,6 +75,11 @@ bool ArtDatabase::load(const std::filesystem::path& artPath, std::string& error)
     cons.remapable = art.getBool("CONS", "Remapable", false);
     if (cons.facingCount != 8) {
         error = "Enhanced Art.ini must define exactly 8 CONS facings";
+        return false;
+    }
+    const std::string facingMap = art.get(cons.sequence, "FacingMap");
+    if (!facingMap.empty() && !parseFacingMap(facingMap, cons.facingMap)) {
+        error = "Invalid animation facing map in " + cons.sequence + ".FacingMap";
         return false;
     }
     const std::string sequenceKeys[] = {
@@ -105,7 +127,7 @@ const ArtDefinition* ArtDatabase::find(std::string_view image) const {
 }
 
 int ArtDatabase::frameIndex(std::string_view image, std::string_view sequence, int animationIndex,
-    int facingIndex) const {
+    int artFacingIndex) const {
     const ArtDefinition* definition = find(image);
     if (definition == nullptr) {
         return 0;
@@ -123,12 +145,17 @@ int ArtDatabase::frameIndex(std::string_view image, std::string_view sequence, i
     }
     int facing = 0;
     if (value.facingStride > 0) {
-        facing = facingIndex % definition->facingCount;
+        facing = artFacingIndex % definition->facingCount;
         if (facing < 0) {
             facing += definition->facingCount;
         }
     }
     return value.firstFrame + facing * value.facingStride + frame;
+}
+
+int ArtDatabase::frameIndexForDirection(std::string_view image, std::string_view sequence,
+    int animationIndex, int directionIndex) const {
+    return frameIndex(image, sequence, animationIndex, facingForDirection(image, directionIndex));
 }
 
 int ArtDatabase::sequenceFrameCount(std::string_view image, std::string_view sequence) const {
@@ -170,6 +197,18 @@ bool ArtDatabase::sequenceIsDirectional(std::string_view image, std::string_view
 int ArtDatabase::facingCount(std::string_view image) const {
     const ArtDefinition* definition = find(image);
     return definition == nullptr ? 1 : definition->facingCount;
+}
+
+int ArtDatabase::facingForDirection(std::string_view image, int directionIndex) const {
+    const ArtDefinition* definition = find(image);
+    if (definition == nullptr || definition->facingCount <= 0) {
+        return 0;
+    }
+    int normalized = directionIndex % definition->facingCount;
+    if (normalized < 0) {
+        normalized += definition->facingCount;
+    }
+    return definition->facingMap[static_cast<std::size_t>(normalized)];
 }
 
 } // namespace ra2yr::gamedata

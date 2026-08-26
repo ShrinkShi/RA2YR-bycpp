@@ -94,3 +94,46 @@
 ### 真实验证
 - CMake configure、MSVC build、CTest 均成功；实际 EXE 保持响应并捕获主菜单、Editor 和 F3 画面。
 - 运行期日志确认 Select/Move/Attack 三条 WAV voice、Rules.ini、Art.ini、CONS.SHP 和 unittem.pal 已加载。
+
+## 2026-08-26 - PR #1 第三次人工验收收口
+
+### 用户目标
+- 不新增第二单位、生产、AI、Trigger 或其他玩法；修复方向映射、命令语音重复、SHP 锚点/选取、Owner remap、Command Card targeting、等距 Camera/Zoom 和 Editor 工具层。
+
+### 本轮处理
+- 增加屏幕八方向 `Direction8` 与 `Art.ini` `FacingMap`，Simulation 不再把世界数学角度直接当 SHP facing。
+- 将静态地形保留为 world/isometric 顶点，在 D3D11 world constant 中应用 CameraOffset/Zoom；统一世界坐标到渲染、选取、命令和小地图视口。
+- 将 SHP crop/full-canvas metadata 与 ground pivot 送入 GPU，单击选取改为当前帧 screen-space bounds。
+- 将所属色 remap 改为 16..31 的 16 级 ColorScheme LUT；生命条改为绿/黄/红健康状态。
+- 将命令应答与 WeaponFire 分离，Voice 使用独立 stream 和 latest-intent 清队列策略；增加 F3 VoiceAck/LastVoice 观测。
+- 增加 F2 可拖动/折叠/关闭的 SandboxPalette，正常生产栏不再承载编辑器 Owner 控件；F6 提供八方向开发测试循环。
+
+### 关键结论
+- 远端 feature exact HEAD 在本轮开始前为 `79ce22118da760aeee0749e582768c1623862dfe`；corpus worktree 的既有未提交内容未触碰。
+- MSVC 严格警告编译已通过；CTest 和最终运行截图待本轮全部改动完成后重新执行。
+
+### 影响文件
+- `src/Engine/Core/Types.h`
+- `src/GameData/Art.*`
+- `src/Renderer/D3D11Renderer.*`
+- `src/Simulation/Simulation.*`
+- `src/Westwood/Palette/Palette.*`
+- `src/Westwood/Shp/Shp.*`
+- `src/Client/main.cpp`
+- `tests/core_tests.cpp`
+- `INI/Art.ini`
+- `assets/audio/voices.ini`
+- `assets/ui/strings.ini`
+- `docs/FIRST_PLAYABLE_EDITOR_SLICE.md`
+- `docs/THIRD_PARTY_ASSETS.md`
+
+### 后续事项
+- 重新执行 configure/build/CTest，实际运行并采集主菜单、浮窗、HUD、F3、Owner remap、Camera/Zoom 和命令交互证据；人工视觉/交互结论仍交由用户确认。
+
+## 2026-08-26 - PR #1 第三次收口最终验证
+
+- 从干净生成目录执行 `tools/dev/dev.ps1 -Clean`。
+- 自动发现 Visual Studio 18.9.12120.119、MSVC x64、CMake 4.4.2、Ninja 1.13.2，并使用独立 `E:\Tools\vcpkg`。
+- vcpkg manifest restore、CMake configure/generate、MSVC `/W4 /WX` compile/link 全部完成；CTest `1/1` 通过。
+- 实际启动 `ra2yr_client.exe`，窗口保持响应；日志确认语音表、Rules.ini、Art.ini、CONS.SHP、unittem.pal 已读取。
+- 采集主菜单、Editor HUD、F3、F6 八方向 Walk、Command Card target 证据；截图仅作为运行证据，不替代人工视觉/交互验收。

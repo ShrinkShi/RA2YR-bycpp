@@ -7,17 +7,41 @@
 
 namespace ra2yr::westwood {
 
+ColorSchemeId colorSchemeForOwner(Owner owner) {
+    switch (owner) {
+    case Owner::Red: return ColorSchemeId::Red;
+    case Owner::Blue: return ColorSchemeId::Blue;
+    case Owner::Neutral: return ColorSchemeId::Neutral;
+    }
+    return ColorSchemeId::Neutral;
+}
+
 PaletteColor Palette::remappedColor(std::uint8_t index, Owner owner) const {
+    return remappedColor(index, colorSchemeForOwner(owner));
+}
+
+PaletteColor Palette::remappedColor(std::uint8_t index, ColorSchemeId scheme) const {
     PaletteColor result = colors_[index];
-    if (index < 0xc0U || index > 0xcfU) {
+    if (index < 16U || index > 31U) {
         return result;
     }
-    const float shade = 0.60F + static_cast<float>(index - 0xc0U) / 32.0F;
-    const PaletteColor ownerColor = owner == Owner::Red ? PaletteColor{255, 31, 20} :
-        owner == Owner::Blue ? PaletteColor{46, 140, 255} : PaletteColor{217, 217, 217};
-    result.r = static_cast<std::uint8_t>(std::clamp(ownerColor.r * shade, 0.0F, 255.0F));
-    result.g = static_cast<std::uint8_t>(std::clamp(ownerColor.g * shade, 0.0F, 255.0F));
-    result.b = static_cast<std::uint8_t>(std::clamp(ownerColor.b * shade, 0.0F, 255.0F));
+    return houseColorRemap(scheme)[static_cast<std::size_t>(index - 16U)];
+}
+
+std::array<PaletteColor, 16> Palette::houseColorRemap(ColorSchemeId scheme) const {
+    const PaletteColor dark = scheme == ColorSchemeId::Red ? PaletteColor{48, 4, 3} :
+        scheme == ColorSchemeId::Blue ? PaletteColor{4, 20, 58} : PaletteColor{32, 32, 32};
+    const PaletteColor bright = scheme == ColorSchemeId::Red ? PaletteColor{255, 64, 30} :
+        scheme == ColorSchemeId::Blue ? PaletteColor{70, 170, 255} : PaletteColor{210, 210, 210};
+    std::array<PaletteColor, 16> result{};
+    for (std::size_t index = 0; index < result.size(); ++index) {
+        const float ratio = static_cast<float>(index) / 15.0F;
+        result[index] = {
+            static_cast<std::uint8_t>(std::clamp(dark.r + (bright.r - dark.r) * ratio, 0.0F, 255.0F)),
+            static_cast<std::uint8_t>(std::clamp(dark.g + (bright.g - dark.g) * ratio, 0.0F, 255.0F)),
+            static_cast<std::uint8_t>(std::clamp(dark.b + (bright.b - dark.b) * ratio, 0.0F, 255.0F)),
+        };
+    }
     return result;
 }
 

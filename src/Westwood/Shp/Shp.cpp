@@ -67,6 +67,8 @@ bool ShpTsDocument::load(const std::filesystem::path& path, std::string& error) 
         frame.y = readU16(bytes, header + 2);
         frame.width = readU16(bytes, header + 4);
         frame.height = readU16(bytes, header + 6);
+        frame.fullWidth = width_;
+        frame.fullHeight = height_;
         const std::uint8_t format = bytes.at(header + 8);
         const std::uint32_t fileOffset = readU32(bytes, header + 20);
         const std::size_t dataWidth = frame.width + (frame.width % 2U);

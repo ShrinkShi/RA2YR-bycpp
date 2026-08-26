@@ -39,6 +39,7 @@ struct Entity {
     std::optional<GridCoord> patrolPoint;
     bool selected = false;
     AnimationState animationState = AnimationState::Idle;
+    Direction8 direction = Direction8::North;
     int facing = 0;
     int animationFrame = 0;
     float animationTime = 0.0F;
@@ -53,7 +54,10 @@ public:
     void update(float seconds);
     void clearSelection();
     void selectSingle(GridCoord position, float radius = 0.8F);
+    void selectEntity(std::uint32_t id);
     void selectBox(WorldCoord topLeft, WorldCoord bottomRight);
+
+    [[nodiscard]] static Direction8 directionFromDelta(float dx, float dy);
 
     void issueMove(GridCoord destination);
     void issueStop();
@@ -69,6 +73,7 @@ public:
 
 private:
     void setAnimation(Entity& entity, AnimationState state);
+    void setFacing(Entity& entity, float dx, float dy);
     void updateAnimation(Entity& entity, float seconds);
     void applyToSelected(const Command& command);
     void updateEntity(Entity& entity, float seconds);

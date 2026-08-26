@@ -21,24 +21,27 @@ bool hostile(Owner first, Owner second) {
     return first != Owner::Neutral && second != Owner::Neutral && first != second;
 }
 
-int facingFromDelta(float dx, float dy, int fallback, int facingCount) {
-    if (std::abs(dx) < 0.001F && std::abs(dy) < 0.001F) {
-        return fallback;
-    }
-    const int safeFacingCount = std::max(1, facingCount);
-    int facing = static_cast<int>(std::lround(
-        std::atan2(dy, dx) / (2.0F * kPi / static_cast<float>(safeFacingCount))));
-    facing %= safeFacingCount;
-    if (facing < 0) {
-        facing += safeFacingCount;
-    }
-    return facing;
-}
-
 } // namespace
 
 Simulation::Simulation(const gamedata::ArtDefinition& animationDefinition)
     : animationDefinition_(animationDefinition) {}
+
+Direction8 Simulation::directionFromDelta(float dx, float dy) {
+    if (std::abs(dx) < 0.001F && std::abs(dy) < 0.001F) {
+        return Direction8::North;
+    }
+
+    // Convert grid movement to the same 2:1 isometric screen basis used by
+    // IsoProjection before selecting the nearest screen-space octant.
+    const float screenDx = dx - dy;
+    const float screenDy = (dx + dy) * 0.5F;
+    float angle = std::atan2(-screenDx, -screenDy);
+    if (angle < 0.0F) {
+        angle += 2.0F * kPi;
+    }
+    const int index = static_cast<int>(std::lround(angle / (kPi * 0.25F))) % 8;
+    return static_cast<Direction8>(index);
+}
 
 std::uint32_t Simulation::spawn(const gamedata::UnitDefinition& definition, Owner owner, GridCoord position) {
     Entity entity;
@@ -120,7 +123,7 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
                 const float length = std::sqrt(dx * dx + dy * dy);
                 if (length > 0.001F) {
                     const float step = static_cast<float>(entity.speed) * seconds * 0.55F;
-                    entity.facing = facingFromDelta(dx, dy, entity.facing, animationDefinition_.facingCount);
+                    setFacing(entity, dx, dy);
                     entity.position.x += dx / length * std::min(step, length);
                     entity.position.y += dy / length * std::min(step, length);
                     moving = true;
@@ -128,8 +131,8 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
             }
         } else {
             attacking = true;
-            entity.facing = facingFromDelta(target->position.x - entity.position.x,
-                target->position.y - entity.position.y, entity.facing, animationDefinition_.facingCount);
+            setFacing(entity, target->position.x - entity.position.x,
+                target->position.y - entity.position.y);
             if (entity.weaponCooldown <= 0.0F) {
                 target->health = std::max(0, target->health - entity.weaponDamage);
                 target->recentAttacker = entity.id;
@@ -154,7 +157,7 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
         const float length = std::sqrt(dx * dx + dy * dy);
         if (length > 0.001F) {
             const float step = static_cast<float>(entity.speed) * seconds * 0.55F;
-            entity.facing = facingFromDelta(dx, dy, entity.facing, animationDefinition_.facingCount);
+            setFacing(entity, dx, dy);
             entity.position.x += dx / length * std::min(step, length);
             entity.position.y += dy / length * std::min(step, length);
             moving = true;
@@ -181,6 +184,11 @@ void Simulation::setAnimation(Entity& entity, AnimationState state) {
     entity.animationState = state;
     entity.animationFrame = 0;
     entity.animationTime = 0.0F;
+}
+
+void Simulation::setFacing(Entity& entity, float dx, float dy) {
+    entity.direction = directionFromDelta(dx, dy);
+    entity.facing = animationDefinition_.facingMap[static_cast<std::size_t>(entity.direction)];
 }
 
 void Simulation::updateAnimation(Entity& entity, float seconds) {
@@ -230,6 +238,14 @@ void Simulation::selectSingle(GridCoord position, float radius) {
     }
     if (best != nullptr) {
         best->selected = true;
+    }
+}
+
+void Simulation::selectEntity(std::uint32_t id) {
+    clearSelection();
+    Entity* entity = find(id);
+    if (entity != nullptr && isAlive(*entity)) {
+        entity->selected = true;
     }
 }
 

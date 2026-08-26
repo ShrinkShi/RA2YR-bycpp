@@ -27,6 +27,23 @@ VSOutput main(VSInput input) {
     return output;
 })";
 
+constexpr char kWorldVertexShader[] = R"(
+cbuffer WorldTransform : register(b1) {
+    float4 cameraIsoZoom;
+    float4 viewportLogical;
+};
+struct VSInput { float2 position : POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; };
+struct VSOutput { float4 position : SV_POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; };
+VSOutput main(VSInput input) {
+    VSOutput output;
+    const float2 logical = (input.position - cameraIsoZoom.xy) * cameraIsoZoom.z + viewportLogical.xy;
+    output.position = float4(logical.x / viewportLogical.z * 2.0f - 1.0f,
+        1.0f - logical.y / viewportLogical.w * 2.0f, 0.0f, 1.0f);
+    output.uv = input.uv;
+    output.color = input.color;
+    return output;
+})";
+
 constexpr char kSolidPixelShader[] = R"(
 struct PSInput { float4 position : SV_POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; };
 float4 main(PSInput input) : SV_TARGET { return input.color; }
@@ -43,7 +60,7 @@ constexpr char kIndexedSpritePixelShader[] = R"(
 Texture2D indexedTexture : register(t0);
 Texture2D paletteTexture : register(t1);
 SamplerState indexedSampler : register(s0);
-cbuffer SpriteConstants : register(b0) { float4 ownerColor; };
+cbuffer SpriteConstants : register(b0) { float4 houseColorRemap[16]; };
 struct PSInput { float4 position : SV_POSITION; float2 uv : TEXCOORD0; float4 color : COLOR0; };
 float4 main(PSInput input) : SV_TARGET {
     const float paletteIndex = indexedTexture.SampleLevel(indexedSampler, input.uv, 0).r * 255.0f;
@@ -51,9 +68,8 @@ float4 main(PSInput input) : SV_TARGET {
     float4 result = paletteTexture.Load(int3(index, 0, 0));
     if (index == 0) {
         result.a = 0.0f;
-    } else if (index >= 192 && index <= 207) {
-        const float shade = 0.60f + (index - 192.0f) / 32.0f;
-        result.rgb = ownerColor.rgb * shade;
+    } else if (index >= 16 && index <= 31) {
+        result = houseColorRemap[index - 16];
     }
     return result * input.color;
 }
@@ -92,9 +108,9 @@ void appendStaticDiamond(std::vector<D3D11Renderer::Vertex>& vertices, float lef
         if (length <= 0.0001F) {
             return;
         }
-        constexpr float kNdcThickness = 0.0015F;
-        const float nx = -dy / length * kNdcThickness * 0.5F;
-        const float ny = dx / length * kNdcThickness * 0.5F;
+        constexpr float kWorldThickness = 1.0F;
+        const float nx = -dy / length * kWorldThickness * 0.5F;
+        const float ny = dx / length * kWorldThickness * 0.5F;
         const ScreenCoord a{start.x + nx, start.y + ny};
         const ScreenCoord b{end.x + nx, end.y + ny};
         const ScreenCoord c{end.x - nx, end.y - ny};
@@ -188,6 +204,14 @@ bool SpriteCache::load(std::string_view assetId, const westwood::ShpTsDocument& 
         D3D11_SUBRESOURCE_DATA initialData{indexed.data(), asset.width, 0};
         ComPtr<ID3D11Texture2D> texture;
         SpriteFrameGPU gpuFrame;
+        gpuFrame.frameX = static_cast<float>(frame.x);
+        gpuFrame.frameY = static_cast<float>(frame.y);
+        gpuFrame.frameWidth = static_cast<float>(frame.width);
+        gpuFrame.frameHeight = static_cast<float>(frame.height);
+        gpuFrame.fullWidth = static_cast<float>(frame.fullWidth);
+        gpuFrame.fullHeight = static_cast<float>(frame.fullHeight);
+        gpuFrame.pivotX = static_cast<float>(frame.fullWidth) * 0.5F;
+        gpuFrame.pivotY = static_cast<float>(frame.y + frame.height);
         if (FAILED(device_->CreateTexture2D(&description, &initialData, &texture)) ||
             FAILED(device_->CreateShaderResourceView(texture.Get(), nullptr, &gpuFrame.indexedView))) {
             error = "Unable to create indexed GPU texture for SHP frame";
@@ -255,16 +279,19 @@ bool D3D11Renderer::createDevice(SDL_Window* window, std::string& error) {
 
 bool D3D11Renderer::createPipelines(std::string& error) {
     ComPtr<ID3DBlob> vertexBlob;
+    ComPtr<ID3DBlob> worldVertexBlob;
     ComPtr<ID3DBlob> solidBlob;
     ComPtr<ID3DBlob> textureBlob;
     ComPtr<ID3DBlob> indexedSpriteBlob;
     if (!compileShader(kVertexShader, "main", "vs_5_0", vertexBlob, error) ||
+        !compileShader(kWorldVertexShader, "main", "vs_5_0", worldVertexBlob, error) ||
         !compileShader(kSolidPixelShader, "main", "ps_5_0", solidBlob, error) ||
         !compileShader(kTexturePixelShader, "main", "ps_5_0", textureBlob, error) ||
         !compileShader(kIndexedSpritePixelShader, "main", "ps_5_0", indexedSpriteBlob, error)) {
         return false;
     }
     if (FAILED(device_->CreateVertexShader(vertexBlob->GetBufferPointer(), vertexBlob->GetBufferSize(), nullptr, &vertexShader_)) ||
+        FAILED(device_->CreateVertexShader(worldVertexBlob->GetBufferPointer(), worldVertexBlob->GetBufferSize(), nullptr, &worldVertexShader_)) ||
         FAILED(device_->CreatePixelShader(solidBlob->GetBufferPointer(), solidBlob->GetBufferSize(), nullptr, &solidPixelShader_)) ||
         FAILED(device_->CreatePixelShader(textureBlob->GetBufferPointer(), textureBlob->GetBufferSize(), nullptr, &texturePixelShader_)) ||
         FAILED(device_->CreatePixelShader(indexedSpriteBlob->GetBufferPointer(), indexedSpriteBlob->GetBufferSize(), nullptr,
@@ -291,11 +318,16 @@ bool D3D11Renderer::createPipelines(std::string& error) {
         return false;
     }
     D3D11_BUFFER_DESC constantDescription{};
-    constantDescription.ByteWidth = 16;
+    constantDescription.ByteWidth = 16U * 4U * sizeof(float);
     constantDescription.Usage = D3D11_USAGE_DEFAULT;
     constantDescription.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     if (FAILED(device_->CreateBuffer(&constantDescription, nullptr, &spriteConstantsBuffer_))) {
         error = "D3D11 sprite constant buffer creation failed";
+        return false;
+    }
+    constantDescription.ByteWidth = 32;
+    if (FAILED(device_->CreateBuffer(&constantDescription, nullptr, &worldConstantsBuffer_))) {
+        error = "D3D11 world constant buffer creation failed";
         return false;
     }
     D3D11_BLEND_DESC blendDescription{};
@@ -432,7 +464,13 @@ bool D3D11Renderer::loadPalette(std::string_view assetId, const westwood::Palett
         error = "Unable to create GPU palette texture";
         return false;
     }
-    paletteTextures_[std::string(assetId)] = std::move(view);
+    PaletteGPU resource;
+    resource.texture = std::move(view);
+    for (const westwood::ColorSchemeId scheme : {westwood::ColorSchemeId::Neutral,
+        westwood::ColorSchemeId::Red, westwood::ColorSchemeId::Blue}) {
+        resource.houseColorRemap[static_cast<std::size_t>(scheme)] = palette.houseColorRemap(scheme);
+    }
+    paletteTextures_[std::string(assetId)] = std::move(resource);
     ++statistics_.textureUploadCount;
     return true;
 }
@@ -445,11 +483,11 @@ void D3D11Renderer::buildStaticTerrain(const std::vector<TerrainTileVisual>& til
     std::vector<Vertex> vertices;
     vertices.reserve(tiles.size() * 30U);
     for (const TerrainTileVisual& tile : tiles) {
-        const float left = ndcX(tile.center.x - tile.width * 0.5F);
-        const float right = ndcX(tile.center.x + tile.width * 0.5F);
-        const float top = ndcY(tile.center.y - tile.height * 0.5F);
-        const float bottom = ndcY(tile.center.y + tile.height * 0.5F);
-        appendStaticDiamond(vertices, left, right, top, bottom, ndcX(tile.center.x), ndcY(tile.center.y), tile.fill, tile.edge);
+        const float centerX = (tile.center.x - tile.center.y) * tile.width * 0.5F;
+        const float centerY = (tile.center.x + tile.center.y) * tile.height * 0.5F;
+        appendStaticDiamond(vertices, centerX - tile.width * 0.5F, centerX + tile.width * 0.5F,
+            centerY - tile.height * 0.5F, centerY + tile.height * 0.5F, centerX, centerY,
+            tile.fill, tile.edge);
     }
     D3D11_BUFFER_DESC description{};
     description.Usage = D3D11_USAGE_IMMUTABLE;
@@ -463,6 +501,15 @@ void D3D11Renderer::buildStaticTerrain(const std::vector<TerrainTileVisual>& til
         return;
     }
     terrainVertexCount_ = vertices.size();
+}
+
+void D3D11Renderer::setWorldCamera(WorldCoord worldCenter, float zoom, ScreenCoord viewportCenter,
+    float tileWidth, float tileHeight) {
+    worldCameraCenter_ = worldCenter;
+    worldCameraZoom_ = zoom;
+    worldViewportCenter_ = viewportCenter;
+    worldTileWidth_ = tileWidth;
+    worldTileHeight_ = tileHeight;
 }
 
 void D3D11Renderer::beginFrame() {
@@ -497,10 +544,17 @@ void D3D11Renderer::drawStaticTerrain() {
     flushSolidGeometry();
     const UINT stride = sizeof(Vertex);
     const UINT offset = 0;
+    const std::array<float, 8> worldConstants{
+        (worldCameraCenter_.x - worldCameraCenter_.y) * worldTileWidth_ * 0.5F,
+        (worldCameraCenter_.x + worldCameraCenter_.y) * worldTileHeight_ * 0.5F,
+        worldCameraZoom_, 0.0F,
+        worldViewportCenter_.x, worldViewportCenter_.y, logicalWidth_, logicalHeight_};
+    context_->UpdateSubresource(worldConstantsBuffer_.Get(), 0, nullptr, worldConstants.data(), 0, 0);
     context_->IASetInputLayout(inputLayout_.Get());
     context_->IASetVertexBuffers(0, 1, terrainVertexBuffer_.GetAddressOf(), &stride, &offset);
     context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context_->VSSetShader(vertexShader_.Get(), nullptr, 0);
+    context_->VSSetShader(worldVertexShader_.Get(), nullptr, 0);
+    context_->VSSetConstantBuffers(1, 1, worldConstantsBuffer_.GetAddressOf());
     context_->PSSetShader(solidPixelShader_.Get(), nullptr, 0);
     context_->OMSetBlendState(blendState_.Get(), nullptr, 0xffffffffU);
     context_->Draw(static_cast<UINT>(terrainVertexCount_), 0);
@@ -635,22 +689,30 @@ void D3D11Renderer::drawSprite(std::string_view spriteAssetId, std::string_view 
         return;
     }
     const SpriteFrameGPU& frame = asset->frames[frameIndex % asset->frames.size()];
-    const std::array<float, 4> ownerColor = owner == Owner::Red ? std::array<float, 4>{1.0F, 0.12F, 0.08F, 1.0F} :
-        owner == Owner::Blue ? std::array<float, 4>{0.18F, 0.55F, 1.0F, 1.0F} :
-        std::array<float, 4>{0.85F, 0.85F, 0.85F, 1.0F};
-    context_->UpdateSubresource(spriteConstantsBuffer_.Get(), 0, nullptr, ownerColor.data(), 0, 0);
+    const westwood::ColorSchemeId scheme = westwood::colorSchemeForOwner(owner);
+    const auto& houseColorRemap = palette->second.houseColorRemap[static_cast<std::size_t>(scheme)];
+    std::array<float, 64> remapConstants{};
+    for (std::size_t index = 0; index < houseColorRemap.size(); ++index) {
+        remapConstants[index * 4] = static_cast<float>(houseColorRemap[index].r) / 255.0F;
+        remapConstants[index * 4 + 1] = static_cast<float>(houseColorRemap[index].g) / 255.0F;
+        remapConstants[index * 4 + 2] = static_cast<float>(houseColorRemap[index].b) / 255.0F;
+        remapConstants[index * 4 + 3] = 1.0F;
+    }
+    context_->UpdateSubresource(spriteConstantsBuffer_.Get(), 0, nullptr, remapConstants.data(), 0, 0);
     flushSolidGeometry();
-    const Rect target{center.x - static_cast<float>(asset->width) * scale * 0.5F,
-        center.y - static_cast<float>(asset->height) * scale,
-        static_cast<float>(asset->width) * scale, static_cast<float>(asset->height) * scale};
+    const Rect target = spriteBounds(spriteAssetId, frameIndex, center, scale);
     const float left = ndcX(target.x);
     const float right = ndcX(target.x + target.width);
     const float top = ndcY(target.y);
     const float bottom = ndcY(target.y + target.height);
+    const float u0 = frame.frameX / std::max(1.0F, frame.fullWidth);
+    const float v0 = frame.frameY / std::max(1.0F, frame.fullHeight);
+    const float u1 = (frame.frameX + frame.frameWidth) / std::max(1.0F, frame.fullWidth);
+    const float v1 = (frame.frameY + frame.frameHeight) / std::max(1.0F, frame.fullHeight);
     const Vertex vertices[] = {
-        vertex(left, top, 0.0F, 0.0F, {1.0F, 1.0F, 1.0F, 1.0F}), vertex(right, top, 1.0F, 0.0F, {1.0F, 1.0F, 1.0F, 1.0F}),
-        vertex(right, bottom, 1.0F, 1.0F, {1.0F, 1.0F, 1.0F, 1.0F}), vertex(left, top, 0.0F, 0.0F, {1.0F, 1.0F, 1.0F, 1.0F}),
-        vertex(right, bottom, 1.0F, 1.0F, {1.0F, 1.0F, 1.0F, 1.0F}), vertex(left, bottom, 0.0F, 1.0F, {1.0F, 1.0F, 1.0F, 1.0F}),
+        vertex(left, top, u0, v0, {1.0F, 1.0F, 1.0F, 1.0F}), vertex(right, top, u1, v0, {1.0F, 1.0F, 1.0F, 1.0F}),
+        vertex(right, bottom, u1, v1, {1.0F, 1.0F, 1.0F, 1.0F}), vertex(left, top, u0, v0, {1.0F, 1.0F, 1.0F, 1.0F}),
+        vertex(right, bottom, u1, v1, {1.0F, 1.0F, 1.0F, 1.0F}), vertex(left, bottom, u0, v1, {1.0F, 1.0F, 1.0F, 1.0F}),
     };
     D3D11_MAPPED_SUBRESOURCE mapped{};
     if (FAILED(context_->Map(vertexBuffer_.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
@@ -661,7 +723,7 @@ void D3D11Renderer::drawSprite(std::string_view spriteAssetId, std::string_view 
     const UINT stride = sizeof(Vertex);
     const UINT offset = 0;
     ID3D11ShaderResourceView* indexedView = frame.indexedView.Get();
-    ID3D11ShaderResourceView* paletteView = palette->second.Get();
+    ID3D11ShaderResourceView* paletteView = palette->second.texture.Get();
     context_->IASetInputLayout(inputLayout_.Get());
     context_->IASetVertexBuffers(0, 1, vertexBuffer_.GetAddressOf(), &stride, &offset);
     context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -676,6 +738,17 @@ void D3D11Renderer::drawSprite(std::string_view spriteAssetId, std::string_view 
     ID3D11ShaderResourceView* nullViews[] = {nullptr, nullptr};
     context_->PSSetShaderResources(0, 2, nullViews);
     ++statistics_.drawCalls;
+}
+
+Rect D3D11Renderer::spriteBounds(std::string_view spriteAssetId, std::size_t frameIndex,
+    ScreenCoord ground, float scale) const {
+    const SpriteAsset* asset = spriteCache_.find(spriteAssetId);
+    if (asset == nullptr || asset->frames.empty()) {
+        return {ground.x, ground.y, 0.0F, 0.0F};
+    }
+    const SpriteFrameGPU& frame = asset->frames[frameIndex % asset->frames.size()];
+    return {ground.x - frame.pivotX * scale, ground.y - frame.pivotY * scale,
+        frame.frameWidth * scale, frame.frameHeight * scale};
 }
 
 void D3D11Renderer::drawText(std::wstring text, Rect rect, int size, Color color, bool centered) {

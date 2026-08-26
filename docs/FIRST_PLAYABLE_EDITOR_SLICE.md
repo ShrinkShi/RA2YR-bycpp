@@ -18,7 +18,7 @@ The lower-right command card is deliberately 3 rows by 5 columns. It is not a sc
 - `src/GameData`: Rules-driven E2 and M1Carbine data.
 - `src/Simulation`: EntityId plus compact component-like unit data, separate `Owner`/`Faction` fields and explicit command/order transitions.
 - `src/Renderer`: SDL window ownership boundary, D3D11 indexed sprites/static terrain and Direct2D/DirectWrite text presentation.
-- `src/Client`: MainMenu, EditorSandbox input routing and HUD layout.
+- `src/Client`: MainMenu, EditorSandbox input routing, HUD layout, camera/zoom and the draggable F2 sandbox palette.
 
 Simulation and content readers do not include renderer headers.
 
@@ -55,10 +55,13 @@ The runtime reads its own `INI/Rules.ini`, `INI/Art.ini`, `assets/game/ra2/infan
 - Editor mode in the same executable.
 - 64x64 isometric grass grid with explicit `GridCoord`, `WorldCoord`, `ScreenCoord` conversions and height field.
 - Red/Blue owner placement and real SHP frame decoding/remap from project-owned assets.
+- Engine `Direction8` is mapped to the SHP facing order through `ConSequence.FacingMap`; SHP crop metadata and a shared ground pivot drive rendering and screen-space selection.
+- The world uses an isometric camera with edge scrolling and cursor-centered wheel zoom. Static terrain remains in a GPU vertex buffer and receives camera constants at draw time.
 - Single selection, drag selection, empty-click deselect, right-click commands and keyboard commands.
 - 3x5 command card with only Move, Stop, Hold, Patrol and Attack Move in the first row; the second and third rows are reserved.
 - Left collapsible strategic ability rail with empty slots and right two-tier production sidebar shell with disabled empty producer selectors.
-- Data-driven E2 voice samples for Select, Move and Attack, with procedural cues retained only as fallback/debug audio.
+- Data-driven E2 voice samples for Select, Move acknowledgement and Attack acknowledgement, with procedural cues retained only as fallback/debug audio.
+- Command acknowledgements use a dedicated voice stream and latest-intent queue policy; repeated simulation weapon events are a separate silent-until-sample `WeaponFire` path.
 
 ## Not implemented in this slice
 

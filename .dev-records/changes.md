@@ -59,3 +59,29 @@
 - CMake configure PASS；MSVC x64 compile/link PASS；CTest 1/1 PASS。
 - 实际启动窗口保持响应；主菜单、Editor HUD、F3 性能层截图已重新捕获。
 - 最终人工交互验收仍由用户完成；截图不等同于人工验收通过。
+
+## 2026-08-26 - PR #1 第三次人工验收收口
+
+### 变更范围
+- 只修复现有 Editor Sandbox 的输入、渲染锚点、所属色、音频事件、Camera/Zoom 和 Editor 工具层；不新增第二单位、生产、AI、Trigger、经济或多人。
+
+### 具体改动
+- `Direction8` 使用等距屏幕方向分类，`Art.ini` 以 `FacingMap` 负责素材 facing 映射；F3 显示世界方向、Art facing、动画帧与 SHP frame index。
+- `SpriteFrameGPU` 保存 crop/full-canvas/pivot metadata，渲染和选取共享 ground anchor；静态地形改存 world/isometric 顶点并由 D3D11 constant 应用 camera/zoom。
+- 所属色统一走 Owner -> ColorSchemeId -> 16 级 16..31 remap LUT；健康条按生命状态着色，不再按 Owner 着色。
+- Command Card pending target 优先于框选；Move/Patrol/AttackMove/Smart Context 共享目标路由，快捷键与按钮复用同一行为，Stop/Hold 立即执行。
+- VoiceSelect/MoveAcknowledgement/AttackAcknowledgement 使用真实配置 WAV、独立 voice stream 和清队列策略；attackEvent 只走独立 WeaponFire（当前无素材则静音）。
+- 新增 F2 可拖动/折叠/关闭 `SandboxPalette`，移除正常 Production Sidebar 的 Editor Owner 控件；F6 开发用八方向循环测试。
+
+### 验证情况
+- 增量 MSVC x64 `/W4 /WX` compile/link PASS。
+- 定向 core CTest 已通过；全量 configure/build/CTest、运行截图和人工交互证据待最终收口后重跑。
+
+### 风险
+- 运行期 Camera、screen-space hit-test、16..31 remap 和命令语音需要用户在真实窗口中做最终视觉/交互确认；自动测试不替代人工验收。
+
+## 2026-08-26 - PR #1 第三次收口最终验证
+
+- 完成干净 build 目录验证：独立 vcpkg restore、CMake configure、MSVC x64 compile/link、CTest 和实际运行均成功。
+- 运行时输出确认 `VoiceSelect`、`VoiceMoveAcknowledgement`、`VoiceAttackAcknowledgement` 数据项加载，以及 Rules/Art/CONS.SHP/unittem.pal 内容链路可用。
+- 保留 UI 结构收口：五段底部 HUD、3x5 Command Card、空 Strategic/Producer provider 槽位和独立 SandboxPalette。

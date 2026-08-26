@@ -3,6 +3,7 @@
 #include "Westwood/Ini/Ini.h"
 
 #include <filesystem>
+#include <array>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -23,6 +24,7 @@ struct ArtDefinition {
     std::string sequence;
     int facingCount = 8;
     bool remapable = false;
+    std::array<int, 8> facingMap{0, 1, 2, 3, 4, 5, 6, 7};
     std::unordered_map<std::string, AnimationSequence> sequences;
 };
 
@@ -32,12 +34,15 @@ public:
 
     [[nodiscard]] const ArtDefinition* find(std::string_view image) const;
     [[nodiscard]] int frameIndex(std::string_view image, std::string_view sequence,
-        int animationIndex = 0, int facingIndex = 0) const;
+        int animationIndex = 0, int artFacingIndex = 0) const;
+    [[nodiscard]] int frameIndexForDirection(std::string_view image, std::string_view sequence,
+        int animationIndex, int directionIndex) const;
     [[nodiscard]] int sequenceFrameCount(std::string_view image, std::string_view sequence) const;
     [[nodiscard]] int sequenceFrameDelayMs(std::string_view image, std::string_view sequence) const;
     [[nodiscard]] bool sequenceLoops(std::string_view image, std::string_view sequence) const;
     [[nodiscard]] bool sequenceIsDirectional(std::string_view image, std::string_view sequence) const;
     [[nodiscard]] int facingCount(std::string_view image) const;
+    [[nodiscard]] int facingForDirection(std::string_view image, int directionIndex) const;
     [[nodiscard]] bool loaded() const { return loaded_; }
 
 private:

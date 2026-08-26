@@ -19,6 +19,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -42,6 +43,9 @@ struct RenderScaleConfig {
 constexpr RenderScaleConfig kRenderScale{1.0F, 1.65F, 1.10F, 1.20F};
 constexpr float kTileWidth = 44.0F * kRenderScale.worldRenderScale;
 constexpr float kTileHeight = 22.0F * kRenderScale.worldRenderScale;
+constexpr Rect kWorldViewport{100.0F, 50.0F, 1390.0F, 780.0F};
+constexpr float kCameraEdgeThreshold = 22.0F;
+constexpr float kCameraPanPixelsPerSecond = 420.0F;
 
 enum class AppMode {
     MainMenu,
@@ -79,11 +83,12 @@ struct PerformanceTracker {
 };
 
 enum class AudioCue {
-    MenuHover,
-    MenuClick,
-    UnitSelect,
-    UnitMove,
-    UnitAttack,
+    UIHover,
+    UIClick,
+    VoiceSelect,
+    VoiceMoveAcknowledgement,
+    VoiceAttackAcknowledgement,
+    WeaponFire,
 };
 
 class AudioService {
@@ -95,13 +100,15 @@ public:
         spec.format = SDL_AUDIO_F32;
         spec.channels = 1;
         spec.freq = 48000;
-        stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
-        if (stream_ == nullptr || !SDL_ResumeAudioStreamDevice(stream_)) {
+        voiceStream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+        sfxStream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+        if (voiceStream_ == nullptr || sfxStream_ == nullptr ||
+            !SDL_ResumeAudioStreamDevice(voiceStream_) || !SDL_ResumeAudioStreamDevice(sfxStream_)) {
             std::cerr << "[Audio] Disabled: " << SDL_GetError() << '\n';
             shutdown();
             return false;
         }
-        std::cerr << "[Audio] Stream ready; procedural cues remain fallback\n";
+        std::cerr << "[Audio] Voice/SFX streams ready; procedural SFX remain fallback\n";
         return true;
     }
 
@@ -111,9 +118,9 @@ public:
             return false;
         }
         const std::pair<AudioCue, std::string_view> voices[] = {
-            {AudioCue::UnitSelect, "VoiceSelect"},
-            {AudioCue::UnitMove, "VoiceMove"},
-            {AudioCue::UnitAttack, "VoiceAttack"},
+            {AudioCue::VoiceSelect, "VoiceSelect"},
+            {AudioCue::VoiceMoveAcknowledgement, "VoiceMoveAcknowledgement"},
+            {AudioCue::VoiceAttackAcknowledgement, "VoiceAttackAcknowledgement"},
         };
         for (const auto& [cue, section] : voices) {
             const std::string file = config.get(section, "File");
@@ -133,22 +140,71 @@ public:
     }
 
     void shutdown() {
-        if (stream_ != nullptr) {
-            SDL_DestroyAudioStream(stream_);
-            stream_ = nullptr;
+        if (voiceStream_ != nullptr) {
+            SDL_DestroyAudioStream(voiceStream_);
+            voiceStream_ = nullptr;
+        }
+        if (sfxStream_ != nullptr) {
+            SDL_DestroyAudioStream(sfxStream_);
+            sfxStream_ = nullptr;
         }
     }
 
     void play(AudioCue cue) {
-        if (stream_ == nullptr) {
+        if (isVoiceCue(cue)) {
+            playVoice(cue);
             return;
         }
+        if (cue == AudioCue::WeaponFire) {
+            // WeaponFire has a separate event path; it remains silent until a
+            // real weapon sample is added and must never borrow unit voice.
+            return;
+        }
+        playProcedural(sfxStream_, cue);
+    }
+
+    [[nodiscard]] std::uint32_t voiceAckCount() const { return voiceAckCount_; }
+    [[nodiscard]] const std::string& lastVoiceEvent() const { return lastVoiceEvent_; }
+
+private:
+    static bool isVoiceCue(AudioCue cue) {
+        return cue == AudioCue::VoiceSelect || cue == AudioCue::VoiceMoveAcknowledgement ||
+            cue == AudioCue::VoiceAttackAcknowledgement;
+    }
+
+    void playVoice(AudioCue cue) {
+        if (cue == AudioCue::VoiceMoveAcknowledgement || cue == AudioCue::VoiceAttackAcknowledgement) {
+            ++voiceAckCount_;
+        }
+        lastVoiceEvent_ = cueName(cue);
+        if (voiceStream_ == nullptr) {
+            return;
+        }
+        // A command acknowledgement is a latest-intent channel.  Clearing
+        // the previous sample prevents stale voice commands from piling up.
+        SDL_ClearAudioStream(voiceStream_);
         const auto voice = voiceSamples_.find(cue);
         if (voice != voiceSamples_.end() && !voice->second.empty()) {
-            if (!SDL_PutAudioStreamData(stream_, voice->second.data(),
+            if (!SDL_PutAudioStreamData(voiceStream_, voice->second.data(),
                 static_cast<int>(voice->second.size() * sizeof(float)))) {
                 std::cerr << "[Audio] Voice queue failed: " << SDL_GetError() << '\n';
             }
+            return;
+        }
+        playProcedural(voiceStream_, cue);
+    }
+
+    static std::string cueName(AudioCue cue) {
+        switch (cue) {
+        case AudioCue::VoiceSelect: return "VoiceSelect";
+        case AudioCue::VoiceMoveAcknowledgement: return "VoiceMoveAcknowledgement";
+        case AudioCue::VoiceAttackAcknowledgement: return "VoiceAttackAcknowledgement";
+        default: return {};
+        }
+    }
+
+    static void playProcedural(SDL_AudioStream* stream, AudioCue cue) {
+        if (stream == nullptr) {
             return;
         }
         const CueSettings settings = settingsFor(cue);
@@ -165,12 +221,11 @@ public:
                 (std::sin(2.0F * pi * settings.frequency * t) +
                     0.30F * std::sin(2.0F * pi * settings.secondFrequency * t));
         }
-        if (!SDL_PutAudioStreamData(stream_, samples.data(), static_cast<int>(samples.size() * sizeof(float)))) {
+        if (!SDL_PutAudioStreamData(stream, samples.data(), static_cast<int>(samples.size() * sizeof(float)))) {
             std::cerr << "[Audio] Cue queue failed: " << SDL_GetError() << '\n';
         }
     }
 
-private:
     struct CueSettings {
         float frequency;
         float secondFrequency;
@@ -180,11 +235,12 @@ private:
 
     static CueSettings settingsFor(AudioCue cue) {
         switch (cue) {
-        case AudioCue::MenuHover: return {880.0F, 1320.0F, 0.045F, 0.10F};
-        case AudioCue::MenuClick: return {220.0F, 440.0F, 0.095F, 0.16F};
-        case AudioCue::UnitSelect: return {330.0F, 495.0F, 0.16F, 0.18F};
-        case AudioCue::UnitMove: return {260.0F, 390.0F, 0.12F, 0.15F};
-        case AudioCue::UnitAttack: return {120.0F, 180.0F, 0.20F, 0.20F};
+        case AudioCue::UIHover: return {880.0F, 1320.0F, 0.045F, 0.10F};
+        case AudioCue::UIClick: return {220.0F, 440.0F, 0.095F, 0.16F};
+        case AudioCue::VoiceSelect: return {330.0F, 495.0F, 0.16F, 0.18F};
+        case AudioCue::VoiceMoveAcknowledgement: return {260.0F, 390.0F, 0.12F, 0.15F};
+        case AudioCue::VoiceAttackAcknowledgement: return {120.0F, 180.0F, 0.20F, 0.20F};
+        case AudioCue::WeaponFire: return {0.0F, 0.0F, 0.0F, 0.0F};
         }
         return {440.0F, 660.0F, 0.10F, 0.12F};
     }
@@ -254,8 +310,11 @@ private:
         return true;
     }
 
-    SDL_AudioStream* stream_ = nullptr;
+    SDL_AudioStream* voiceStream_ = nullptr;
+    SDL_AudioStream* sfxStream_ = nullptr;
     std::unordered_map<AudioCue, std::vector<float>> voiceSamples_;
+    std::uint32_t voiceAckCount_ = 0;
+    std::string lastVoiceEvent_;
 };
 
 std::wstring utf8ToWide(const std::string& value) {
@@ -289,6 +348,11 @@ public:
         if (!renderer_.initialize(window_, error)) {
             return false;
         }
+        camera_.projection.tileWidth = kTileWidth;
+        camera_.projection.tileHeight = kTileHeight;
+        camera_.viewportCenter = {kWorldViewport.x + kWorldViewport.width * 0.5F,
+            kWorldViewport.y + kWorldViewport.height * 0.5F};
+        camera_.worldCenter = {0.0F, 0.0F};
         contentRoot_ = executableDirectory();
         std::string audioError;
         if (!audio_.loadVoiceSet(contentRoot_ / "assets/audio/voices.ini", audioError)) {
@@ -337,6 +401,8 @@ public:
             processEvents();
             const auto simulationStart = std::chrono::steady_clock::now();
             if (mode_ == AppMode::EditorSandbox) {
+                updateCamera(static_cast<float>(seconds));
+                updateDirectionTest(static_cast<float>(seconds));
                 while (simulationAccumulator >= kSimulationStep) {
                     simulation_->update(static_cast<float>(kSimulationStep));
                     playSimulationAudio();
@@ -393,6 +459,8 @@ private:
              {"portrait", L"头像 / 动画预览"}, {"producer", L"产能建筑"}, {"tool", L"工具"},
              {"terrain", L"Terrain"}, {"unit", L"Unit"}, {"object", L"对象"}, {"mode", L"模式"},
              {"select", L"选择"}, {"place", L"放置"}, {"collapse", L"收起"}, {"expand", L"展开"},
+             {"sandbox_palette", L"沙盒工具"}, {"category", L"类别"}, {"current_object", L"当前对象"},
+             {"faction_owner", L"所属"}, {"disabled", L"不可用"}, {"palette_hint", L"F2 显示/隐藏工具窗"},
              {"animation_idle", L"待机"}, {"animation_walk", L"行走"}, {"animation_attack", L"攻击"},
             {"animation_death", L"死亡"},
             {"runtime", L"SIMULATION ONLINE"}, {"asset_missing", L"RUNTIME ASSETS NOT FOUND"},
@@ -448,14 +516,11 @@ private:
 
     bool buildTerrain(std::string& error) {
         std::vector<renderer::TerrainTileVisual> tiles;
+        tiles.reserve(64U * 64U);
         for (int x = 0; x < 64; ++x) {
             for (int y = 0; y < 64; ++y) {
-                const ScreenCoord center = gridToScreen({static_cast<float>(x), static_cast<float>(y)});
-                if (center.x < 80.0F || center.x > 1510.0F || center.y < 30.0F || center.y > 870.0F) {
-                    continue;
-                }
                 const bool alternate = ((x + y) & 1) != 0;
-                tiles.push_back({center, kTileWidth, kTileHeight,
+                tiles.push_back({{static_cast<float>(x), static_cast<float>(y)}, kTileWidth, kTileHeight,
                     alternate ? Color{0.10F, 0.25F, 0.14F, 1.0F} : Color{0.08F, 0.21F, 0.12F, 1.0F},
                     {0.18F, 0.38F, 0.20F, 0.70F}});
             }
@@ -479,20 +544,69 @@ private:
     }
 
     ScreenCoord gridToScreen(WorldCoord coord) const {
-        return projection_.toScreen(coord);
+        return camera_.toScreen(coord);
     }
 
     GridCoord screenToGrid(ScreenCoord screen) const {
-        return projection_.toGrid(screen);
+        return camera_.toGrid(screen);
     }
 
     WorldCoord screenToWorld(ScreenCoord screen) const {
-        const GridCoord grid = screenToGrid(screen);
-        return {static_cast<float>(grid.x), static_cast<float>(grid.y)};
+        return camera_.toWorld(screen);
     }
 
     bool inWorld(ScreenCoord position) const {
-        return Rect{100.0F, 50.0F, 1390.0F, 780.0F}.contains(position.x, position.y);
+        return kWorldViewport.contains(position.x, position.y);
+    }
+
+    void updateCamera(float seconds) {
+        if (!inWorld(mouse_) || sandboxPaletteDragging_ ||
+            (sandboxPaletteVisible_ && sandboxPaletteRect().contains(mouse_.x, mouse_.y))) {
+            return;
+        }
+        ScreenCoord delta{};
+        if (mouse_.x <= kWorldViewport.x + kCameraEdgeThreshold) {
+            delta.x -= kCameraPanPixelsPerSecond * seconds;
+        } else if (mouse_.x >= kWorldViewport.x + kWorldViewport.width - kCameraEdgeThreshold) {
+            delta.x += kCameraPanPixelsPerSecond * seconds;
+        }
+        if (mouse_.y <= kWorldViewport.y + kCameraEdgeThreshold) {
+            delta.y -= kCameraPanPixelsPerSecond * seconds;
+        } else if (mouse_.y >= kWorldViewport.y + kWorldViewport.height - kCameraEdgeThreshold) {
+            delta.y += kCameraPanPixelsPerSecond * seconds;
+        }
+        if (std::abs(delta.x) > 0.0F || std::abs(delta.y) > 0.0F) {
+            camera_.panScreen(delta);
+        }
+    }
+
+    void updateDirectionTest(float seconds) {
+        if (!directionTestMode_) {
+            return;
+        }
+        directionTestTime_ -= seconds;
+        if (directionTestTime_ > 0.0F) {
+            return;
+        }
+        const simulation::Entity* testEntity = nullptr;
+        for (const auto& entity : simulation_->entities()) {
+            if (entity.health > 0) {
+                testEntity = &entity;
+                break;
+            }
+        }
+        if (testEntity == nullptr) {
+            return;
+        }
+        simulation_->selectEntity(testEntity->id);
+        static constexpr GridCoord worldDeltas[] = {
+            {-1, -1}, {-1, 0}, {-1, 1}, {0, 1}, {1, 1}, {1, 0}, {1, -1}, {0, -1}};
+        const GridCoord delta = worldDeltas[directionTestIndex_];
+        const GridCoord origin{static_cast<int>(std::lround(testEntity->position.x)),
+            static_cast<int>(std::lround(testEntity->position.y))};
+        simulation_->issueMove({origin.x + delta.x * 4, origin.y + delta.y * 4});
+        directionTestIndex_ = (directionTestIndex_ + 1) % 8;
+        directionTestTime_ = 1.25F;
     }
 
     void processEvents() {
@@ -516,8 +630,18 @@ private:
                 if (mode_ == AppMode::MainMenu) {
                     updateMenuHover();
                 }
+                if (sandboxPaletteDragging_) {
+                    sandboxPalettePosition_ = {mouse_.x - sandboxPaletteDragOffset_.x,
+                        mouse_.y - sandboxPaletteDragOffset_.y};
+                }
                 if (dragging_) {
                     dragEnd_ = mouse_;
+                }
+                break;
+            case SDL_EVENT_MOUSE_WHEEL:
+                if (mode_ == AppMode::EditorSandbox && inWorld(mouse_) &&
+                    !(sandboxPaletteVisible_ && sandboxPaletteRect().contains(mouse_.x, mouse_.y))) {
+                    camera_.zoomAt(mouse_, event.wheel.y > 0.0F ? 1.10F : 1.0F / 1.10F);
                 }
                 break;
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -551,6 +675,18 @@ private:
             toastTime_ = 2.0F;
             return;
         }
+        if (key == SDLK_F2 && mode_ == AppMode::EditorSandbox) {
+            sandboxPaletteVisible_ = !sandboxPaletteVisible_;
+            return;
+        }
+        if (key == SDLK_F6 && mode_ == AppMode::EditorSandbox) {
+            directionTestMode_ = !directionTestMode_;
+            directionTestIndex_ = 0;
+            directionTestTime_ = 0.0F;
+            toast_ = directionTestMode_ ? L"8-DIRECTION TEST ON" : L"8-DIRECTION TEST OFF";
+            toastTime_ = 1.5F;
+            return;
+        }
         if (mode_ == AppMode::MainMenu) {
             if (key == SDLK_ESCAPE) {
                 running_ = false;
@@ -560,7 +696,9 @@ private:
             return;
         }
         if (key == SDLK_ESCAPE) {
-            if (placing_) {
+            if (pendingAction_ != PendingAction::None) {
+                pendingAction_ = PendingAction::None;
+            } else if (placing_) {
                 placing_ = false;
             } else {
                 mode_ = AppMode::MainMenu;
@@ -569,8 +707,14 @@ private:
             pendingAction_ = PendingAction::Move;
         } else if (key == SDLK_S) {
             simulation_->issueStop();
+            if (hasSelectedUnits()) {
+                audio_.play(AudioCue::VoiceMoveAcknowledgement);
+            }
         } else if (key == SDLK_H) {
             simulation_->issueHold();
+            if (hasSelectedUnits()) {
+                audio_.play(AudioCue::VoiceMoveAcknowledgement);
+            }
         } else if (key == SDLK_P) {
             pendingAction_ = PendingAction::Patrol;
         } else if (key == SDLK_A) {
@@ -599,7 +743,7 @@ private:
         }
         if (hovered != hoveredMenuButton_) {
             if (hovered >= 0) {
-                audio_.play(AudioCue::MenuHover);
+                audio_.play(AudioCue::UIHover);
             }
             hoveredMenuButton_ = hovered;
         }
@@ -613,21 +757,33 @@ private:
             for (std::size_t i = 0; i < menuButtons_.size(); ++i) {
                 if (menuButtons_[i].rect.contains(mouse_.x, mouse_.y)) {
                     pressedMenuButton_ = static_cast<int>(i);
-                    audio_.play(AudioCue::MenuClick);
+                    audio_.play(AudioCue::UIClick);
                     return;
                 }
             }
             return;
         }
         if (!leftButton) {
-            issueWorldAction(mouse_, PendingAction::None);
+            if (pendingAction_ != PendingAction::None) {
+                pendingAction_ = PendingAction::None;
+                toast_ = L"COMMAND CANCELLED";
+                toastTime_ = 1.5F;
+            } else {
+                issueWorldAction(mouse_, PendingAction::None);
+            }
             return;
         }
         if (handleEditorUiClick()) {
             return;
         }
+        if (pendingAction_ != PendingAction::None) {
+            issueWorldAction(mouse_, pendingAction_);
+            return;
+        }
         if (placing_ && inWorld(mouse_)) {
-            simulation_->spawn(rules_.e2(), placingOwner_, screenToGrid(mouse_));
+            if (editorTool_ == EditorTool::Unit) {
+                simulation_->spawn(rules_.e2(), placingOwner_, screenToGrid(mouse_));
+            }
             placing_ = false;
             return;
         }
@@ -650,6 +806,10 @@ private:
             pressedMenuButton_ = -1;
             return;
         }
+        if (sandboxPaletteDragging_) {
+            sandboxPaletteDragging_ = false;
+            return;
+        }
         if (!dragging_) {
             return;
         }
@@ -658,10 +818,14 @@ private:
         if (dragDistance > 8.0F) {
             simulation_->selectBox(screenToWorld(dragStart_), screenToWorld(dragEnd_));
         } else if (inWorld(mouse_)) {
-            simulation_->selectSingle(screenToGrid(mouse_));
-            pendingAction_ = PendingAction::None;
+            const std::uint32_t unit = unitAt(mouse_);
+            if (unit != 0) {
+                simulation_->selectEntity(unit);
+            } else {
+                simulation_->clearSelection();
+            }
             if (selectedEntity() != nullptr) {
-                audio_.play(AudioCue::UnitSelect);
+                audio_.play(AudioCue::VoiceSelect);
             }
         }
     }
@@ -677,30 +841,76 @@ private:
         }
     }
 
+    Rect sandboxPaletteRect() const {
+        return {sandboxPalettePosition_.x, sandboxPalettePosition_.y, 300.0F,
+            sandboxPaletteCollapsed_ ? 42.0F : 328.0F};
+    }
+
+    bool handleSandboxPaletteClick() {
+        if (!sandboxPaletteVisible_ || !sandboxPaletteRect().contains(mouse_.x, mouse_.y)) {
+            return false;
+        }
+        const Rect palette = sandboxPaletteRect();
+        const Rect header{palette.x, palette.y, palette.width, 42.0F};
+        if (header.contains(mouse_.x, mouse_.y)) {
+            const Rect collapse{palette.x + palette.width - 76.0F, palette.y + 7.0F, 30.0F, 28.0F};
+            const Rect close{palette.x + palette.width - 38.0F, palette.y + 7.0F, 30.0F, 28.0F};
+            if (close.contains(mouse_.x, mouse_.y)) {
+                sandboxPaletteVisible_ = false;
+            } else if (collapse.contains(mouse_.x, mouse_.y)) {
+                sandboxPaletteCollapsed_ = !sandboxPaletteCollapsed_;
+            } else {
+                sandboxPaletteDragging_ = true;
+                sandboxPaletteDragOffset_ = {mouse_.x - palette.x, mouse_.y - palette.y};
+            }
+            audio_.play(AudioCue::UIClick);
+            return true;
+        }
+        if (sandboxPaletteCollapsed_) {
+            return true;
+        }
+        const Rect terrain{palette.x + 16.0F, palette.y + 74.0F, 126.0F, 38.0F};
+        const Rect unit{palette.x + 158.0F, palette.y + 74.0F, 126.0F, 38.0F};
+        if (terrain.contains(mouse_.x, mouse_.y)) {
+            editorTool_ = EditorTool::Terrain;
+            placing_ = false;
+        } else if (unit.contains(mouse_.x, mouse_.y)) {
+            editorTool_ = EditorTool::Unit;
+        } else if (Rect{palette.x + 16.0F, palette.y + 122.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y) ||
+            Rect{palette.x + 158.0F, palette.y + 122.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+            // Building and resource tools are intentionally disabled in this
+            // slice; the window reserves their future editor slots.
+        } else if (Rect{palette.x + 16.0F, palette.y + 180.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+            placingOwner_ = Owner::Red;
+        } else if (Rect{palette.x + 158.0F, palette.y + 180.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+            placingOwner_ = Owner::Blue;
+        } else if (Rect{palette.x + 16.0F, palette.y + 238.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+            placing_ = false;
+        } else if (Rect{palette.x + 158.0F, palette.y + 238.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+            editorTool_ = EditorTool::Unit;
+            placing_ = true;
+        } else {
+            return true;
+        }
+        audio_.play(AudioCue::UIClick);
+        return true;
+    }
+
     bool handleEditorUiClick() {
+        if (handleSandboxPaletteClick()) {
+            return true;
+        }
         if (Rect{17.0F, 121.0F, 60.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
             strategicCollapsed_ = !strategicCollapsed_;
-            audio_.play(AudioCue::MenuClick);
+            audio_.play(AudioCue::UIClick);
             return true;
         }
-        if (mouse_.y >= 144.0F && mouse_.y <= 186.0F && mouse_.x >= 1520.0F && mouse_.x < 1900.0F) {
+        if (mouse_.y >= 108.0F && mouse_.y <= 150.0F && mouse_.x >= 1520.0F && mouse_.x < 1900.0F) {
             activeTab_ = std::clamp(static_cast<int>((mouse_.x - 1520.0F) / 96.0F), 0, 3);
-            audio_.play(AudioCue::MenuClick);
+            audio_.play(AudioCue::UIClick);
             return true;
         }
-        if (mouse_.y >= 216.0F && mouse_.y <= 258.0F && mouse_.x >= 1520.0F && mouse_.x < 1894.0F) {
-            return true;
-        }
-        if (Rect{1510.0F, 70.0F, 190.0F, 46.0F}.contains(mouse_.x, mouse_.y)) {
-            placingOwner_ = Owner::Red;
-            editorTool_ = EditorTool::Unit;
-            placing_ = true;
-            return true;
-        }
-        if (Rect{1710.0F, 70.0F, 190.0F, 46.0F}.contains(mouse_.x, mouse_.y)) {
-            placingOwner_ = Owner::Blue;
-            editorTool_ = EditorTool::Unit;
-            placing_ = true;
+        if (mouse_.y >= 180.0F && mouse_.y <= 222.0F && mouse_.x >= 1520.0F && mouse_.x < 1894.0F) {
             return true;
         }
         if (Rect{1820.0F, 8.0F, 90.0F, 40.0F}.contains(mouse_.x, mouse_.y)) {
@@ -717,8 +927,14 @@ private:
                     pendingAction_ = PendingAction::Move;
                 } else if (slot == 1) {
                     simulation_->issueStop();
+                    if (hasSelectedUnits()) {
+                        audio_.play(AudioCue::VoiceMoveAcknowledgement);
+                    }
                 } else if (slot == 2) {
                     simulation_->issueHold();
+                    if (hasSelectedUnits()) {
+                        audio_.play(AudioCue::VoiceMoveAcknowledgement);
+                    }
                 } else if (slot == 3) {
                     pendingAction_ = PendingAction::Patrol;
                 } else if (slot == 4) {
@@ -736,32 +952,45 @@ private:
         }
         const PendingAction action = actionFromMouse == PendingAction::None ? pendingAction_ : actionFromMouse;
         const GridCoord destination = screenToGrid(position);
+        const bool hasSelection = hasSelectedUnits();
         if (action == PendingAction::Move) {
-            simulation_->issueMove(destination);
-            audio_.play(AudioCue::UnitMove);
+            if (hasSelection) {
+                simulation_->issueMove(destination);
+                audio_.play(AudioCue::VoiceMoveAcknowledgement);
+            }
         } else if (action == PendingAction::Patrol) {
-            simulation_->issuePatrol(destination);
-            audio_.play(AudioCue::UnitMove);
+            if (hasSelection) {
+                simulation_->issuePatrol(destination);
+                audio_.play(AudioCue::VoiceMoveAcknowledgement);
+            }
         } else if (action == PendingAction::AttackMove) {
-            simulation_->issueAttackMove(destination);
-            audio_.play(AudioCue::UnitMove);
+            const std::uint32_t target = unitAt(position);
+            if (hasSelection && isEnemyTarget(target)) {
+                simulation_->issueAttack(target);
+                audio_.play(AudioCue::VoiceAttackAcknowledgement);
+            } else if (hasSelection) {
+                simulation_->issueAttackMove(destination);
+                audio_.play(AudioCue::VoiceAttackAcknowledgement);
+            }
         } else if (action == PendingAction::Attack) {
             const std::uint32_t target = unitAt(position);
-            if (target != 0) {
+            if (hasSelection && isEnemyTarget(target)) {
                 simulation_->issueAttack(target);
-                audio_.play(AudioCue::UnitAttack);
+                audio_.play(AudioCue::VoiceAttackAcknowledgement);
             }
         } else {
             const std::uint32_t target = unitAt(position);
-            if (target != 0) {
+            if (hasSelection && isEnemyTarget(target)) {
                 simulation_->issueAttack(target);
-                audio_.play(AudioCue::UnitAttack);
-            } else {
+                audio_.play(AudioCue::VoiceAttackAcknowledgement);
+            } else if (hasSelection) {
                 simulation_->issueMove(destination);
-                audio_.play(AudioCue::UnitMove);
+                audio_.play(AudioCue::VoiceMoveAcknowledgement);
             }
         }
-        pendingAction_ = PendingAction::None;
+        if (action != PendingAction::None && hasSelection) {
+            pendingAction_ = PendingAction::None;
+        }
     }
 
     void playSimulationAudio() {
@@ -771,29 +1000,68 @@ private:
                 continue;
             }
             if (entity.attackEvent > it->second) {
-                audio_.play(AudioCue::UnitAttack);
+                audio_.play(AudioCue::WeaponFire);
                 it->second = entity.attackEvent;
             }
         }
     }
 
+    bool hasSelectedUnits() const {
+        for (const auto& entity : simulation_->entities()) {
+            if (entity.selected && entity.health > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool isEnemyTarget(std::uint32_t target) const {
+        const auto* candidate = simulation_->find(target);
+        if (candidate == nullptr || candidate->health <= 0) {
+            return false;
+        }
+        for (const auto& entity : simulation_->entities()) {
+            if (entity.selected && entity.health > 0 && entity.owner != candidate->owner) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     std::uint32_t unitAt(ScreenCoord position) const {
         std::uint32_t result = 0;
-        float closest = 24.0F;
+        float closest = std::numeric_limits<float>::max();
         for (const auto& entity : simulation_->entities()) {
             if (entity.health <= 0) {
                 continue;
             }
             const ScreenCoord unitPosition = gridToScreen(entity.position);
-            const float dx = unitPosition.x - position.x;
-            const float dy = unitPosition.y - position.y;
-            const float candidate = std::sqrt(dx * dx + dy * dy);
-            if (candidate < closest) {
-                closest = candidate;
-                result = entity.id;
+            const std::size_t frameIndex = static_cast<std::size_t>(art_.frameIndex(
+                rules_.e2().image, animationSequence(entity.animationState), entity.animationFrame, entity.facing));
+            const Rect bounds = renderer_.spriteBounds(rules_.e2().image, frameIndex, unitPosition,
+                kRenderScale.unitVisualScale * camera_.zoom);
+            const float expanded = 6.0F * camera_.zoom;
+            const Rect hitBounds{bounds.x - expanded, bounds.y - expanded,
+                bounds.width + expanded * 2.0F, bounds.height + expanded * 2.0F};
+            if (hitBounds.contains(position.x, position.y)) {
+                const float candidate = std::abs(unitPosition.x - position.x) +
+                    std::abs(unitPosition.y - position.y);
+                if (candidate < closest) {
+                    closest = candidate;
+                    result = entity.id;
+                }
             }
         }
         return result;
+    }
+
+    static std::string directionName(Direction8 direction) {
+        static constexpr const char* names[] = {"N", "NW", "W", "SW", "S", "SE", "E", "NE"};
+        return names[static_cast<std::size_t>(direction)];
+    }
+
+    static std::wstring directionLabel(Direction8 direction) {
+        return utf8ToWide(directionName(direction));
     }
 
     static std::string animationSequence(simulation::AnimationState state) {
@@ -814,6 +1082,17 @@ private:
         case simulation::AnimationState::Death: return T("animation_death");
         }
         return T("animation_idle");
+    }
+
+    std::wstring pendingActionLabel() const {
+        switch (pendingAction_) {
+        case PendingAction::Move: return T("move");
+        case PendingAction::Patrol: return T("patrol");
+        case PendingAction::AttackMove: return T("attack_move");
+        case PendingAction::Attack: return T("attack");
+        case PendingAction::None: return {};
+        }
+        return {};
     }
 
     const simulation::Entity* previewEntity() const {
@@ -879,8 +1158,8 @@ private:
 
     void renderPerformanceOverlay() {
         const auto& renderStats = renderer_.statistics();
-        renderer_.drawRect({24.0F, 62.0F, 620.0F, 228.0F}, {0.01F, 0.02F, 0.025F, 0.94F});
-        renderer_.drawBorder({24.0F, 62.0F, 620.0F, 228.0F}, {0.35F, 0.80F, 0.55F, 0.95F}, 2.0F);
+        renderer_.drawRect({24.0F, 62.0F, 700.0F, 340.0F}, {0.01F, 0.02F, 0.025F, 0.94F});
+        renderer_.drawBorder({24.0F, 62.0F, 700.0F, 340.0F}, {0.35F, 0.80F, 0.55F, 0.95F}, 2.0F);
         renderer_.drawText(L"PERFORMANCE [F3] / VSYNC [F4]", {42.0F, 72.0F, 420.0F, 24.0F}, 17,
             {0.45F, 1.0F, 0.60F, 1.0F}, false);
         renderer_.drawText(L"FPS " + formatNumber(performance_.averageFps) + L"   FRAME " +
@@ -896,16 +1175,35 @@ private:
             {0.85F, 0.90F, 0.88F, 1.0F}, false);
         const auto* debugEntity = previewEntity();
         if (debugEntity != nullptr) {
+            const int debugFrameIndex = art_.frameIndex(rules_.e2().image,
+                animationSequence(debugEntity->animationState), debugEntity->animationFrame, debugEntity->facing);
             renderer_.drawText(L"ASSET E2 / CONS.SHP   FACINGS 8   SEQUENCE " +
                 utf8ToWide(animationSequence(debugEntity->animationState)) +
-                L"   DIR " + std::to_wstring(debugEntity->facing) + L"   FRAME " +
-                std::to_wstring(debugEntity->animationFrame), {42.0F, 180.0F, 580.0F, 24.0F}, 14,
+                L"   ANIMATION FRAME " + std::to_wstring(debugEntity->animationFrame) +
+                L"   SHP FRAME INDEX " + std::to_wstring(debugFrameIndex), {42.0F, 180.0F, 660.0F, 24.0F}, 14,
                 {1.0F, 0.82F, 0.28F, 1.0F}, false);
         }
+        renderer_.drawText(L"WORLD " + directionLabel(debugEntity != nullptr ? debugEntity->direction : Direction8::North) +
+            L"   ART FACING " + std::to_wstring(debugEntity != nullptr ? debugEntity->facing : 0) +
+            L"   FRAME " + std::to_wstring(debugEntity != nullptr ? debugEntity->animationFrame : 0),
+            {42.0F, 206.0F, 660.0F, 24.0F}, 14, {1.0F, 0.82F, 0.28F, 1.0F}, false);
+        renderer_.drawText(L"GROUND " + (debugEntity != nullptr ?
+            (std::to_wstring(static_cast<int>(debugEntity->position.x)) + L"," +
+                std::to_wstring(static_cast<int>(debugEntity->position.y))) : L"--") +
+            L"   CAMERA " + std::to_wstring(static_cast<int>(camera_.worldCenter.x)) + L"," +
+            std::to_wstring(static_cast<int>(camera_.worldCenter.y)) + L"   ZOOM " +
+            formatNumber(camera_.zoom, 2), {42.0F, 232.0F, 660.0F, 24.0F}, 14,
+            {0.72F, 0.90F, 0.80F, 1.0F}, false);
+        renderer_.drawText(L"VOICE ACK " + std::to_wstring(audio_.voiceAckCount()) + L"   LAST " +
+            utf8ToWide(audio_.lastVoiceEvent()), {42.0F, 258.0F, 660.0F, 24.0F}, 14,
+            {0.90F, 0.72F, 0.38F, 1.0F}, false);
         renderer_.drawText(L"MOUSE " + std::to_wstring(static_cast<int>(mouse_.x)) + L"," +
             std::to_wstring(static_cast<int>(mouse_.y)) + L"   SELECTED " +
-            std::to_wstring(selectedEntity() != nullptr ? 1 : 0), {42.0F, 206.0F, 580.0F, 24.0F}, 14,
+            std::to_wstring(selectedEntity() != nullptr ? 1 : 0), {42.0F, 284.0F, 660.0F, 24.0F}, 14,
             {0.72F, 0.90F, 0.80F, 1.0F}, false);
+        renderer_.drawText(L"8-DIRECTION TEST [F6] " + std::wstring(directionTestMode_ ? L"ON" : L"OFF") +
+            L"   NEXT " + directionLabel(static_cast<Direction8>(directionTestIndex_)),
+            {42.0F, 310.0F, 660.0F, 24.0F}, 14, {0.62F, 0.78F, 1.0F, 1.0F}, false);
     }
 
     void renderMainMenu() {
@@ -953,12 +1251,85 @@ private:
             renderer_.drawRect({field.x + normalizedX * field.width - 4.0F,
                 field.y + normalizedY * field.height - 4.0F, 8.0F, 8.0F}, color);
         }
+        const WorldCoord viewCorners[] = {
+            camera_.toWorld({kWorldViewport.x, kWorldViewport.y}),
+            camera_.toWorld({kWorldViewport.x + kWorldViewport.width, kWorldViewport.y}),
+            camera_.toWorld({kWorldViewport.x, kWorldViewport.y + kWorldViewport.height}),
+            camera_.toWorld({kWorldViewport.x + kWorldViewport.width, kWorldViewport.y + kWorldViewport.height}),
+        };
+        float minX = viewCorners[0].x;
+        float maxX = viewCorners[0].x;
+        float minY = viewCorners[0].y;
+        float maxY = viewCorners[0].y;
+        for (const WorldCoord corner : viewCorners) {
+            minX = std::min(minX, corner.x);
+            maxX = std::max(maxX, corner.x);
+            minY = std::min(minY, corner.y);
+            maxY = std::max(maxY, corner.y);
+        }
+        const Rect cameraView{field.x + std::clamp(minX / 64.0F, 0.0F, 1.0F) * field.width,
+            field.y + std::clamp(minY / 64.0F, 0.0F, 1.0F) * field.height,
+            std::max(2.0F, (std::clamp(maxX / 64.0F, 0.0F, 1.0F) -
+                std::clamp(minX / 64.0F, 0.0F, 1.0F)) * field.width),
+            std::max(2.0F, (std::clamp(maxY / 64.0F, 0.0F, 1.0F) -
+                std::clamp(minY / 64.0F, 0.0F, 1.0F)) * field.height)};
+        renderer_.drawBorder(cameraView, {1.0F, 0.84F, 0.25F, 0.85F}, 2.0F);
+    }
+
+    void renderSandboxPalette() {
+        if (!sandboxPaletteVisible_) {
+            return;
+        }
+        const Rect palette = sandboxPaletteRect();
+        renderer_.drawRect(palette, {0.015F, 0.035F, 0.060F, 0.97F});
+        renderer_.drawBorder(palette, {0.24F, 0.62F, 0.86F, 1.0F}, 3.0F);
+        renderer_.drawText(T("sandbox_palette"), {palette.x + 12.0F, palette.y + 5.0F, 172.0F, 30.0F}, 18,
+            {0.65F, 0.88F, 1.0F, 1.0F}, false);
+        renderer_.drawText(sandboxPaletteCollapsed_ ? L"+" : L"_",
+            {palette.x + palette.width - 76.0F, palette.y + 7.0F, 30.0F, 28.0F}, 18,
+            {0.80F, 0.90F, 1.0F, 1.0F});
+        renderer_.drawText(L"x", {palette.x + palette.width - 38.0F, palette.y + 7.0F, 30.0F, 28.0F}, 18,
+            {1.0F, 0.45F, 0.35F, 1.0F});
+        if (sandboxPaletteCollapsed_) {
+            return;
+        }
+        const auto drawToolButton = [this](Rect rect, const std::wstring& label, bool active, bool enabled = true) {
+            renderer_.drawRect(rect, enabled ? (active ? Color{0.18F, 0.25F, 0.12F, 1.0F} :
+                Color{0.04F, 0.07F, 0.10F, 1.0F}) : Color{0.025F, 0.03F, 0.04F, 1.0F});
+            renderer_.drawBorder(rect, enabled && active ? Color{0.95F, 0.76F, 0.20F, 1.0F} :
+                Color{0.24F, 0.40F, 0.52F, 1.0F}, 2.0F);
+            renderer_.drawText(label, rect, 14, enabled ? Color{0.88F, 0.90F, 0.86F, 1.0F} :
+                Color{0.38F, 0.42F, 0.46F, 1.0F});
+        };
+        renderer_.drawText(T("category"), {palette.x + 16.0F, palette.y + 48.0F, 100.0F, 22.0F}, 13,
+            {0.60F, 0.76F, 0.84F, 1.0F}, false);
+        drawToolButton({palette.x + 16.0F, palette.y + 74.0F, 126.0F, 38.0F}, T("terrain"),
+            editorTool_ == EditorTool::Terrain);
+        drawToolButton({palette.x + 158.0F, palette.y + 74.0F, 126.0F, 38.0F}, T("unit"),
+            editorTool_ == EditorTool::Unit);
+        drawToolButton({palette.x + 16.0F, palette.y + 122.0F, 126.0F, 38.0F}, T("building"), false, false);
+        drawToolButton({palette.x + 158.0F, palette.y + 122.0F, 126.0F, 38.0F}, L"资源", false, false);
+        renderer_.drawText(T("current_object") + L": E2 " + T("unit_name"),
+            {palette.x + 16.0F, palette.y + 166.0F, 268.0F, 26.0F}, 14,
+            {0.92F, 0.84F, 0.34F, 1.0F}, false);
+        renderer_.drawText(T("faction_owner") + L":", {palette.x + 16.0F, palette.y + 202.0F, 80.0F, 22.0F}, 13,
+            {0.60F, 0.76F, 0.84F, 1.0F}, false);
+        drawToolButton({palette.x + 16.0F, palette.y + 222.0F, 126.0F, 38.0F}, T("red"),
+            placingOwner_ == Owner::Red);
+        drawToolButton({palette.x + 158.0F, palette.y + 222.0F, 126.0F, 38.0F}, T("blue"),
+            placingOwner_ == Owner::Blue);
+        renderer_.drawText(T("mode") + L":", {palette.x + 16.0F, palette.y + 270.0F, 80.0F, 22.0F}, 13,
+            {0.60F, 0.76F, 0.84F, 1.0F}, false);
+        drawToolButton({palette.x + 16.0F, palette.y + 286.0F, 126.0F, 34.0F}, T("select"), !placing_);
+        drawToolButton({palette.x + 158.0F, palette.y + 286.0F, 126.0F, 34.0F}, T("place"), placing_);
     }
 
     void renderEditor() {
         renderer_.setWorldStats(terrainTileCount_, simulation_->entities().size());
+        renderer_.setWorldCamera(camera_.worldCenter, camera_.zoom, camera_.viewportCenter,
+            kTileWidth, kTileHeight);
         renderer_.drawRect({0.0F, 0.0F, kLogicalWidth, kLogicalHeight}, {0.008F, 0.012F, 0.018F, 1.0F});
-        const Rect world{100.0F, 50.0F, 1390.0F, 780.0F};
+        const Rect world = kWorldViewport;
         renderer_.drawRect(world, {0.04F, 0.07F, 0.05F, 1.0F});
         renderer_.drawStaticTerrain();
         renderer_.drawBorder(world, {0.65F, 0.48F, 0.18F, 1.0F}, 3.0F);
@@ -971,19 +1342,23 @@ private:
             if (assetReady_) {
                 renderer_.drawSprite(rules_.e2().image, "unittem", static_cast<std::size_t>(art_.frameIndex(
                     rules_.e2().image, animationSequence(entity.animationState), entity.animationFrame,
-                    entity.facing)), entity.owner, position, kRenderScale.unitVisualScale);
+                    entity.facing)), entity.owner, position, kRenderScale.unitVisualScale * camera_.zoom);
             }
             if (entity.selected) {
-                renderer_.drawBorder({position.x - 22.0F, position.y - 8.0F, 44.0F, 16.0F},
-                    {0.95F, 0.85F, 0.25F, 1.0F}, 2.0F);
+                renderer_.drawDiamond(position, 38.0F * camera_.zoom, 14.0F * camera_.zoom,
+                    {0.12F, 0.08F, 0.01F, 0.10F}, {0.95F, 0.85F, 0.25F, 1.0F});
             }
             const float healthRatio = std::clamp(static_cast<float>(entity.health) /
                 static_cast<float>(entity.maxHealth), 0.0F, 1.0F);
-            renderer_.drawRect({position.x - 22.0F, position.y - 30.0F, 44.0F, 4.0F},
+            const float healthBarWidth = 44.0F * camera_.zoom;
+            const Color healthColor = healthRatio >= 0.66F ? Color{0.20F, 0.90F, 0.22F, 1.0F} :
+                healthRatio >= 0.33F ? Color{0.95F, 0.78F, 0.10F, 1.0F} :
+                Color{0.92F, 0.12F, 0.08F, 1.0F};
+            renderer_.drawRect({position.x - healthBarWidth * 0.5F, position.y - 10.0F * camera_.zoom,
+                healthBarWidth, 4.0F * camera_.zoom},
                 {0.16F, 0.02F, 0.02F, 1.0F});
-            renderer_.drawRect({position.x - 22.0F, position.y - 30.0F, 44.0F * healthRatio, 4.0F},
-                entity.owner == Owner::Red ? Color{0.95F, 0.10F, 0.06F, 1.0F} :
-                Color{0.18F, 0.48F, 1.0F, 1.0F});
+            renderer_.drawRect({position.x - healthBarWidth * 0.5F, position.y - 10.0F * camera_.zoom,
+                healthBarWidth * healthRatio, 4.0F * camera_.zoom}, healthColor);
         }
 
         const Rect strategicRail{0.0F, 105.0F, 94.0F, 670.0F};
@@ -1012,27 +1387,25 @@ private:
         renderer_.drawImage("ui.hud.rightbar", {1896.0F, 40.0F, 24.0F, 785.0F});
         renderer_.drawBorder(side, {0.75F, 0.55F, 0.18F, 1.0F}, 4.0F);
         renderer_.drawText(L"10000", {1630.0F, 45.0F, 155.0F, 36.0F}, 28, {1.0F, 0.84F, 0.20F, 1.0F});
-        renderer_.drawText(T("red"), {1510.0F, 70.0F, 190.0F, 34.0F}, 19, {1.0F, 0.30F, 0.18F, 1.0F});
-        renderer_.drawText(T("blue"), {1710.0F, 70.0F, 190.0F, 34.0F}, 19, {0.32F, 0.58F, 1.0F, 1.0F});
-        renderer_.drawText(T("production"), {1520.0F, 108.0F, 370.0F, 30.0F}, 20,
+        renderer_.drawText(T("production"), {1520.0F, 70.0F, 370.0F, 30.0F}, 20,
             {0.95F, 0.78F, 0.22F, 1.0F});
         const std::string tabs[] = {"building", "defense", "infantry", "vehicles"};
         for (int index = 0; index < 4; ++index) {
-            const Rect tab{1520.0F + index * 96.0F, 144.0F, 88.0F, 42.0F};
+            const Rect tab{1520.0F + index * 96.0F, 108.0F, 88.0F, 42.0F};
             renderer_.drawImage(index == activeTab_ ? "ui.hud.tab_hover" : "ui.hud.tab", tab);
             renderer_.drawText(T(tabs[index]), tab, 16, {1.0F, 0.82F, 0.20F, 1.0F});
         }
-        renderer_.drawText(T("producer"), {1520.0F, 191.0F, 370.0F, 26.0F}, 16,
+        renderer_.drawText(T("producer"), {1520.0F, 155.0F, 370.0F, 26.0F}, 16,
             {0.86F, 0.68F, 0.22F, 1.0F});
         for (int index = 0; index < 3; ++index) {
-            const Rect producer{1520.0F + index * 126.0F, 216.0F, 118.0F, 42.0F};
+            const Rect producer{1520.0F + index * 126.0F, 180.0F, 118.0F, 42.0F};
             renderer_.drawImage("ui.hud.tab", producer, {0.55F, 0.55F, 0.58F, 1.0F});
             renderer_.drawText(L"--", producer, 18, {0.42F, 0.44F, 0.48F, 1.0F});
         }
         for (int index = 0; index < 12; ++index) {
             const int column = index % 3;
             const int row = index / 3;
-            const Rect product{1528.0F + column * 122.0F, 275.0F + row * 95.0F, 108.0F, 80.0F};
+            const Rect product{1528.0F + column * 122.0F, 239.0F + row * 95.0F, 108.0F, 80.0F};
             renderer_.drawImage("ui.hud.button", product);
             renderer_.drawText(L"--", {product.x, product.y + 12.0F, product.width, 28.0F}, 24,
                 {0.42F, 0.44F, 0.48F, 1.0F});
@@ -1087,13 +1460,21 @@ private:
 
         const Rect card{1518.0F, 850.0F, 382.0F, 188.0F};
         drawHudPanel(card, L"COMMAND CARD  3 x 5");
+        if (pendingAction_ != PendingAction::None) {
+            renderer_.drawText(L"TARGET: " + pendingActionLabel(), {1700.0F, 855.0F, 188.0F, 20.0F}, 12,
+                {1.0F, 0.34F, 0.18F, 1.0F}, false);
+        }
         const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "", "", "", "", "", "", "", "", "", ""};
         for (int slot = 0; slot < 15; ++slot) {
             const int column = slot % 5;
             const int row = slot / 5;
             const Rect button{1523.0F + column * 76.0F, 878.0F + row * 52.0F, 72.0F, 48.0F};
             const bool hot = button.contains(mouse_.x, mouse_.y);
-            renderer_.drawImage(hot ? "ui.hud.button_hover" : "ui.hud.button", button);
+            const bool active = (slot == 0 && pendingAction_ == PendingAction::Move) ||
+                (slot == 3 && pendingAction_ == PendingAction::Patrol) ||
+                (slot == 4 && pendingAction_ == PendingAction::AttackMove);
+            renderer_.drawImage(hot || active ? "ui.hud.button_hover" : "ui.hud.button", button,
+                active ? Color{1.0F, 0.78F, 0.38F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
             if (!commandKeys[slot].empty()) {
                 const int fontSize = slot == 4 ? 9 : 13;
                 renderer_.drawText(T(commandKeys[slot]), button, fontSize, {1.0F, 0.84F, 0.26F, 1.0F});
@@ -1102,13 +1483,9 @@ private:
 
         renderer_.drawText(T("editor_title"), {116.0F, 10.0F, 280.0F, 30.0F}, 21,
             {1.0F, 0.82F, 0.20F, 1.0F}, false);
-        const std::wstring toolName = editorTool_ == EditorTool::Terrain ? T("terrain") : T("unit");
-        const std::wstring ownerName = editorTool_ == EditorTool::Unit ? ownerText(placingOwner_) : L"--";
-        const std::wstring modeName = placing_ ? T("place") : T("select");
-        renderer_.drawText(T("tool") + L": " + toolName + L"  |  " + T("object") + L": E2  |  " +
-            T("owner") + L": " + ownerName + L"  |  " + T("mode") + L": " + modeName,
-            {410.0F, 10.0F, 1350.0F, 30.0F}, 15, {0.80F, 0.82F, 0.82F, 1.0F}, false);
-        renderer_.drawText(T("editor_hint") + L"   T 工具", {410.0F, 34.0F, 1350.0F, 24.0F}, 13,
+        renderer_.drawText(T("palette_hint"), {410.0F, 10.0F, 1350.0F, 30.0F}, 15,
+            {0.80F, 0.82F, 0.82F, 1.0F}, false);
+        renderer_.drawText(T("editor_hint"), {410.0F, 34.0F, 1350.0F, 24.0F}, 13,
             {0.58F, 0.62F, 0.66F, 1.0F}, false);
         renderer_.drawText(L"MENU", {1820.0F, 8.0F, 90.0F, 40.0F}, 17,
             {1.0F, 0.84F, 0.24F, 1.0F});
@@ -1124,6 +1501,7 @@ private:
             renderer_.drawRect(selection, {0.3F, 0.6F, 1.0F, 0.12F});
             renderer_.drawBorder(selection, {0.45F, 0.80F, 1.0F, 0.9F}, 2.0F);
         }
+        renderSandboxPalette();
     }
 
     const simulation::Entity* selectedEntity() const {
@@ -1162,14 +1540,22 @@ private:
     bool placing_ = false;
     bool dragging_ = false;
     bool strategicCollapsed_ = false;
+    bool sandboxPaletteVisible_ = true;
+    bool sandboxPaletteCollapsed_ = false;
+    bool sandboxPaletteDragging_ = false;
+    bool directionTestMode_ = false;
     int activeTab_ = 0;
+    int directionTestIndex_ = 0;
     int pressedMenuButton_ = -1;
     int hoveredMenuButton_ = -1;
     float toastTime_ = 0.0F;
+    float directionTestTime_ = 0.0F;
     ScreenCoord mouse_{};
     ScreenCoord dragStart_{};
     ScreenCoord dragEnd_{};
-    IsoProjection projection_{kTileWidth, kTileHeight, {790.0F, 440.0F}};
+    ScreenCoord sandboxPalettePosition_{118.0F, 92.0F};
+    ScreenCoord sandboxPaletteDragOffset_{};
+    IsometricCamera camera_{};
     std::size_t terrainTileCount_ = 0;
     std::vector<MenuButton> menuButtons_ = {
         {"campaign", "ui.main.button", "ui.main.button_hover", {1322.0F, 315.0F, 176.0F, 49.0F}},

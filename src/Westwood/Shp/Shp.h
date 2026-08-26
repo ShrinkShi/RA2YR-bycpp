@@ -12,6 +12,8 @@ struct ShpFrame {
     std::uint16_t y = 0;
     std::uint16_t width = 0;
     std::uint16_t height = 0;
+    std::uint16_t fullWidth = 0;
+    std::uint16_t fullHeight = 0;
     std::vector<std::uint8_t> pixels;
 };
 
