@@ -18,7 +18,7 @@ namespace ra2yr::renderer {
 
 class D3D11Renderer {
 public:
-    D3D11Renderer() = default;
+    D3D11Renderer();
     ~D3D11Renderer();
 
     bool initialize(SDL_Window* window, std::string& error);

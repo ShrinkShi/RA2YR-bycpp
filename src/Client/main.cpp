@@ -1,5 +1,3 @@
-#define SDL_MAIN_HANDLED
-
 #include "GameData/Rules.h"
 #include "Renderer/D3D11Renderer.h"
 #include "Simulation/Simulation.h"
@@ -149,13 +147,17 @@ private:
     }
 
     void loadRuntimeAssets() {
-        const char* corpusEnvironment = std::getenv("RA2YR_CORPUS_ROOT");
-        if (corpusEnvironment == nullptr || *corpusEnvironment == '\0') {
+        char* corpusEnvironment = nullptr;
+        std::size_t corpusEnvironmentLength = 0;
+        const errno_t environmentResult = _dupenv_s(&corpusEnvironment, &corpusEnvironmentLength, "RA2YR_CORPUS_ROOT");
+        if (environmentResult != 0 || corpusEnvironment == nullptr || corpusEnvironmentLength == 0) {
+            std::free(corpusEnvironment);
             assetError_ = T("asset_missing");
             std::cerr << "[Content][Error] RA2YR_CORPUS_ROOT is not set; real CONS.SHP is unavailable.\n";
             return;
         }
         const std::filesystem::path root(corpusEnvironment);
+        std::free(corpusEnvironment);
         const std::filesystem::path rulesPath = root / "extracted/ini/yr-1.001-patch/rulesmd.ini";
         const std::filesystem::path alternateRulesPath = root / "rulesmd.ini";
         std::string error;
@@ -194,6 +196,11 @@ private:
 
     GridCoord screenToGrid(ScreenCoord screen) const {
         return projection_.toGrid(screen);
+    }
+
+    WorldCoord screenToWorld(ScreenCoord screen) const {
+        const GridCoord grid = screenToGrid(screen);
+        return {static_cast<float>(grid.x), static_cast<float>(grid.y)};
     }
 
     bool inWorld(ScreenCoord position) const {
@@ -246,7 +253,7 @@ private:
         if (mode_ == AppMode::MainMenu) {
             if (key == SDLK_ESCAPE) {
                 running_ = false;
-            } else if (key == SDLK_e) {
+            } else if (key == SDLK_E) {
                 mode_ = AppMode::EditorSandbox;
             }
             return;
@@ -257,20 +264,20 @@ private:
             } else {
                 mode_ = AppMode::MainMenu;
             }
-        } else if (key == SDLK_m) {
+        } else if (key == SDLK_M) {
             pendingAction_ = PendingAction::Move;
-        } else if (key == SDLK_s) {
+        } else if (key == SDLK_S) {
             simulation_->issueStop();
-        } else if (key == SDLK_h) {
+        } else if (key == SDLK_H) {
             simulation_->issueHold();
-        } else if (key == SDLK_p) {
+        } else if (key == SDLK_P) {
             pendingAction_ = PendingAction::Patrol;
-        } else if (key == SDLK_a) {
+        } else if (key == SDLK_A) {
             pendingAction_ = PendingAction::AttackMove;
-        } else if (key == SDLK_r) {
+        } else if (key == SDLK_R) {
             placingOwner_ = Owner::Red;
             placing_ = true;
-        } else if (key == SDLK_b) {
+        } else if (key == SDLK_B) {
             placingOwner_ = Owner::Blue;
             placing_ = true;
         }
@@ -326,7 +333,7 @@ private:
         dragging_ = false;
         const float dragDistance = std::abs(dragEnd_.x - dragStart_.x) + std::abs(dragEnd_.y - dragStart_.y);
         if (dragDistance > 8.0F) {
-            simulation_->selectBox(screenToGrid(dragStart_), screenToGrid(dragEnd_));
+            simulation_->selectBox(screenToWorld(dragStart_), screenToWorld(dragEnd_));
         } else if (inWorld(mouse_)) {
             simulation_->selectSingle(screenToGrid(mouse_));
             pendingAction_ = PendingAction::None;

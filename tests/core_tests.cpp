@@ -20,6 +20,9 @@ int main() {
 Strength=125
 Speed=4
 Primary=M1Carbine ; comment
+[InlineSection] ; section comment
+Value=ok
+// comment-only line
 [M1Carbine]
 Damage=15
 ROF=25
@@ -33,6 +36,7 @@ Inviso=yes
 )", error));
     assert(ini.getInt("E2", "Strength") == 125);
     assert(ini.get("E2", "Primary") == "M1Carbine");
+    assert(ini.get("InlineSection", "Value") == "ok");
     assert(ini.getBool("InvisibleLow", "Inviso"));
 
     IsoProjection projection;
@@ -82,6 +86,7 @@ Inviso=yes
     simulation.selectSingle({static_cast<int>(moved->position.x), static_cast<int>(moved->position.y)});
     simulation.issueAttack(blue);
     const int initialHealth = simulation.find(blue)->health;
+    simulation.update(1.0F);
     simulation.update(1.0F);
     assert(simulation.find(blue) == nullptr || simulation.find(blue)->health < initialHealth);
 

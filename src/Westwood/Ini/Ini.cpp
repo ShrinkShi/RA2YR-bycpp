@@ -46,17 +46,27 @@ bool IniDocument::loadText(std::string_view text, std::string& error) {
     while (std::getline(stream, line)) {
         ++lineNumber;
         line = trim(line);
-        if (line.empty() || line.front() == ';' || line.front() == '#') {
+        if (line.empty() || line.front() == ';' || line.front() == '#' || line.rfind("//", 0) == 0) {
             continue;
         }
-        if (line.front() == '[' && line.back() == ']') {
-            currentSection = trim(line.substr(1, line.size() - 2));
-            sections_[currentSection];
-            continue;
+        if (line.front() == '[') {
+            const auto closingBracket = line.find(']');
+            if (closingBracket != std::string::npos) {
+                const std::string suffix = trim(line.substr(closingBracket + 1));
+                if (suffix.empty() || suffix.front() == ';' || suffix.front() == '#' || suffix.rfind("//", 0) == 0) {
+                    currentSection = trim(line.substr(1, closingBracket - 1));
+                    sections_[currentSection];
+                    continue;
+                }
+            }
         }
         const auto separator = line.find('=');
-        if (separator == std::string::npos || currentSection.empty()) {
-            error = "Malformed INI line " + std::to_string(lineNumber);
+        if (separator == std::string::npos) {
+            // Westwood list sections also contain bare entries such as 842-GAWETH_ED.
+            continue;
+        }
+        if (currentSection.empty()) {
+            error = "INI key before section at line " + std::to_string(lineNumber);
             return false;
         }
         const std::string key = trim(line.substr(0, separator));
