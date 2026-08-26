@@ -131,6 +131,8 @@ private:
     SDL_Window* window_ = nullptr;
     int pixelWidth_ = 1280;
     int pixelHeight_ = 720;
+    int viewportWidth_ = 1280;
+    int viewportHeight_ = 720;
     float logicalWidth_ = 1920.0F;
     float logicalHeight_ = 1080.0F;
     bool comInitialized_ = false;

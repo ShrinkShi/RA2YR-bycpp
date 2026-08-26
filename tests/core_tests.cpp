@@ -63,10 +63,13 @@ Inviso=yes
     assert(art.load(artPath, error));
     assert(art.find("CONS") != nullptr);
     assert(art.find("CONS")->remapable);
+    assert(art.facingCount("CONS") == 8);
     assert(art.frameIndex("CONS", "Ready") == 0);
+    assert(art.frameIndex("CONS", "Ready", 0, 7) == 7);
     assert(art.frameIndex("CONS", "Walk") == 8);
-    assert(art.frameIndex("CONS", "Fire") == 164);
-    assert(art.frameIndex("CONS", "Death") == 134);
+    assert(art.frameIndex("CONS", "Walk", 3, 2) == 23);
+    assert(art.frameIndex("CONS", "Fire", 5, 7) == 211);
+    assert(art.frameIndex("CONS", "Death", 14, 7) == 253);
 
     westwood::ShpTsDocument projectShp;
     assert(projectShp.load(spritePath, error));
@@ -113,10 +116,14 @@ Inviso=yes
     const std::uint32_t red = simulation.spawn(Owner::Red, {0, 0});
     const std::uint32_t blue = simulation.spawn(Owner::Blue, {8, 0});
     simulation.selectSingle({0, 0});
+    assert(simulation.find(red)->animationState == simulation::AnimationState::Idle);
     simulation.issueMove({3, 0});
     simulation.update(1.0F);
     const auto* moved = simulation.find(red);
     assert(moved != nullptr && moved->position.x > 0.0F);
+    assert(moved->animationState == simulation::AnimationState::Walk ||
+        moved->animationState == simulation::AnimationState::Idle);
+    assert(moved->facing >= 0 && moved->facing < 8);
 
     simulation.clearSelection();
     simulation.selectSingle({static_cast<int>(moved->position.x), static_cast<int>(moved->position.y)});

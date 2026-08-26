@@ -62,3 +62,22 @@
 
 ### 后续事项
 - 完成提交、fetch、push 和 Draft PR 备份后停止，不 merge PR。
+
+## 2026-08-26 - PR #1 人工验收收口修复
+
+### 用户目标
+- 暂停 Gameplay 新功能，只修正 E2 动画、编辑器 HUD、生产/战略侧栏、主菜单比例、玩家信息和最小音频反馈。
+
+### 本轮处理
+- 将 CONS 的动画选择改为 `状态 + 方向 + 帧`，固定 8 方向，并区分 Ready/Walk/Fire/Death。
+- 将底部 HUD 拆为小地图、单位模型、单位信息、头像/动画预览、3x5 Command Card 五段。
+- 增加具体产能建筑选择器第二排、可收起战略能力栏和 Terrain/Unit、E2、Owner、选择/放置状态提示。
+- 将正式单位信息与 F3 调试层分离；F3 才显示 `E2 / CONS.SHP`、方向和帧。
+- 主菜单使用 RA2/YR 红黑 CRT、银色金属框、红色按钮和黄色中文，不再使用 Tiberian Sun 主题。
+- 接入程序化菜单/单位 cue 音频架构，并保留最小可用提示音。
+
+### 真实验证
+- `build.ps1` 重新编译并链接 `ra2yr_client.exe`。
+- `test.ps1` 通过 CTest：1/1。
+- 实际启动窗口，日志确认 `Rules.ini`、`Art.ini`、`CONS.SHP`、`unittem.pal` 加载成功；F3 截图确认 Ready、Walk、Fire 状态证据。
+- 截图仅作为人工验收证据，不将静态/自动化验证描述为人工视觉验收通过。

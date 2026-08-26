@@ -5,6 +5,7 @@
 #include "Westwood/Ini/Ini.h"
 
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_audio.h>
 #include <windows.h>
 
 #include <algorithm>
@@ -36,6 +37,11 @@ enum class AppMode {
     EditorSandbox,
 };
 
+enum class EditorTool {
+    Terrain,
+    Unit,
+};
+
 enum class PendingAction {
     None,
     Move,
@@ -61,6 +67,85 @@ struct PerformanceTracker {
     bool showOverlay = false;
 };
 
+enum class AudioCue {
+    MenuHover,
+    MenuClick,
+    UnitSelect,
+    UnitMove,
+    UnitAttack,
+};
+
+class AudioService {
+public:
+    ~AudioService() { shutdown(); }
+
+    bool initialize() {
+        SDL_AudioSpec spec{};
+        spec.format = SDL_AUDIO_F32;
+        spec.channels = 1;
+        spec.freq = 48000;
+        stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
+        if (stream_ == nullptr || !SDL_ResumeAudioStreamDevice(stream_)) {
+            std::cerr << "[Audio] Disabled: " << SDL_GetError() << '\n';
+            shutdown();
+            return false;
+        }
+        std::cerr << "[Audio] Procedural UI/unit cue stream ready\n";
+        return true;
+    }
+
+    void shutdown() {
+        if (stream_ != nullptr) {
+            SDL_DestroyAudioStream(stream_);
+            stream_ = nullptr;
+        }
+    }
+
+    void play(AudioCue cue) {
+        if (stream_ == nullptr) {
+            return;
+        }
+        const CueSettings settings = settingsFor(cue);
+        constexpr int sampleRate = 48000;
+        const int sampleCount = std::max(1, static_cast<int>(settings.duration * sampleRate));
+        std::vector<float> samples(static_cast<std::size_t>(sampleCount));
+        constexpr float pi = 3.14159265358979323846F;
+        for (int index = 0; index < sampleCount; ++index) {
+            const float t = static_cast<float>(index) / static_cast<float>(sampleRate);
+            const float attack = std::min(1.0F, static_cast<float>(index) / 160.0F);
+            const float release = std::min(1.0F, static_cast<float>(sampleCount - index) / 900.0F);
+            const float envelope = attack * release;
+            samples[static_cast<std::size_t>(index)] = settings.volume * envelope *
+                (std::sin(2.0F * pi * settings.frequency * t) +
+                    0.30F * std::sin(2.0F * pi * settings.secondFrequency * t));
+        }
+        if (!SDL_PutAudioStreamData(stream_, samples.data(), static_cast<int>(samples.size() * sizeof(float)))) {
+            std::cerr << "[Audio] Cue queue failed: " << SDL_GetError() << '\n';
+        }
+    }
+
+private:
+    struct CueSettings {
+        float frequency;
+        float secondFrequency;
+        float duration;
+        float volume;
+    };
+
+    static CueSettings settingsFor(AudioCue cue) {
+        switch (cue) {
+        case AudioCue::MenuHover: return {880.0F, 1320.0F, 0.045F, 0.10F};
+        case AudioCue::MenuClick: return {220.0F, 440.0F, 0.095F, 0.16F};
+        case AudioCue::UnitSelect: return {330.0F, 495.0F, 0.16F, 0.18F};
+        case AudioCue::UnitMove: return {260.0F, 390.0F, 0.12F, 0.15F};
+        case AudioCue::UnitAttack: return {120.0F, 180.0F, 0.20F, 0.20F};
+        }
+        return {440.0F, 660.0F, 0.10F, 0.12F};
+    }
+
+    SDL_AudioStream* stream_ = nullptr;
+};
+
 std::wstring utf8ToWide(const std::string& value) {
     if (value.empty()) {
         return {};
@@ -78,16 +163,17 @@ class ClientApp {
 public:
     bool initialize(std::string& error, bool stressEntities) {
         SDL_SetAppMetadata("RA2YR-bycpp", "0.1.0", "com.shrinkshi.ra2yr-bycpp");
-        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_AUDIO)) {
             error = SDL_GetError();
             return false;
         }
         window_ = SDL_CreateWindow("RA2YR-bycpp - Editor Sandbox", 1280, 720,
-            SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+            SDL_WINDOW_RESIZABLE);
         if (window_ == nullptr) {
             error = SDL_GetError();
             return false;
         }
+        audio_.initialize();
         if (!renderer_.initialize(window_, error)) {
             return false;
         }
@@ -131,6 +217,7 @@ public:
             if (mode_ == AppMode::EditorSandbox) {
                 while (simulationAccumulator >= kSimulationStep) {
                     simulation_->update(static_cast<float>(kSimulationStep));
+                    playSimulationAudio();
                     simulationAccumulator -= kSimulationStep;
                 }
             }
@@ -148,6 +235,7 @@ public:
 
     ~ClientApp() {
         simulation_.reset();
+        audio_.shutdown();
         if (window_ != nullptr) {
             SDL_DestroyWindow(window_);
         }
@@ -170,14 +258,24 @@ private:
             {"online", L"ONLINE"}, {"lan", L"LAN"}, {"settings", L"SETTINGS"},
             {"statistics", L"STATISTICS"}, {"editor", L"MAP EDITOR"}, {"exit", L"EXIT GAME"},
             {"unimplemented", L"NOT IMPLEMENTED"}, {"editor_title", L"EDITOR SANDBOX"},
-            {"editor_hint", L"LMB SELECT / DRAG SELECT   RMB MOVE OR ATTACK   M MOVE  S STOP  H HOLD  P PATROL  A ATTACK MOVE"},
+            {"editor_hint", L"左键选择 / 拖框选择   右键移动或攻击   M 移动  S 停止  H 原地不动  P 巡逻  A 攻击移动"},
             {"red", L"RED"}, {"blue", L"BLUE"}, {"place_red", L"PLACE RED E2"}, {"place_blue", L"PLACE BLUE E2"},
-            {"cancel_place", L"CANCEL PLACEMENT"}, {"strategic", L"STRATEGIC"}, {"production", L"PRODUCTION"},
+            {"cancel_place", L"CANCEL PLACEMENT"}, {"strategic", L"战略能力"}, {"production", L"生产栏"},
             {"building", L"BUILDING"}, {"defense", L"DEFENSE"}, {"infantry", L"INFANTRY"}, {"vehicles", L"VEHICLES"},
-            {"unit_name", L"CONSCRIPT E2 / CONS.SHP"}, {"owner", L"OWNER"}, {"health", L"HEALTH"},
-            {"weapon", L"WEAPON"}, {"armor", L"ARMOR"}, {"move", L"MOVE"}, {"stop", L"STOP"},
-            {"guard", L"GUARD"}, {"attack", L"ATTACK"}, {"deploy", L"DEPLOY"}, {"hold", L"HOLD"},
-            {"patrol", L"PATROL"}, {"repair", L"REPAIR"}, {"waypoint", L"WAYPOINT"}, {"attack_move", L"ATTACK MOVE"},
+            {"unit_name", L"动员兵"}, {"owner", L"所有者"}, {"health", L"生命值"},
+            {"weapon", L"武器"}, {"weapon_name", L"M1卡宾枪"}, {"armor", L"护甲"}, {"armor_name", L"轻型装甲"},
+             {"move", L"移动"}, {"stop", L"停止"}, {"guard", L"警戒"}, {"attack", L"攻击"},
+             {"deploy", L"部署"}, {"hold", L"原地不动"}, {"patrol", L"巡逻"}, {"repair", L"维修"},
+             {"waypoint", L"路径点"}, {"attack_move", L"攻击/攻击移动"},
+             {"minimap", L"小地图"}, {"unit_model", L"单位模型"}, {"unit_info", L"单位信息"},
+             {"portrait", L"头像 / 动画预览"}, {"producer", L"产能建筑"}, {"producer_1", L"重工 I"},
+             {"producer_2", L"重工 II"}, {"producer_3", L"船厂 I"}, {"tool", L"工具"},
+             {"terrain", L"Terrain"}, {"unit", L"Unit"}, {"object", L"对象"}, {"mode", L"模式"},
+             {"select", L"选择"}, {"place", L"放置"}, {"collapse", L"收起"}, {"expand", L"展开"},
+             {"ability_airdrop", L"空降"}, {"ability_nuke", L"核打击"}, {"ability_satellite", L"卫星"},
+             {"ability_genetic", L"基因"}, {"ability_iron_curtain", L"铁幕"},
+             {"animation_idle", L"待机"}, {"animation_walk", L"行走"}, {"animation_attack", L"攻击"},
+            {"animation_death", L"死亡"},
             {"runtime", L"SIMULATION ONLINE"}, {"asset_missing", L"RUNTIME ASSETS NOT FOUND"},
         };
         westwood::IniDocument document;
@@ -297,6 +395,9 @@ private:
                 break;
             case SDL_EVENT_MOUSE_MOTION:
                 mouse_ = logicalMouse(event.motion.x, event.motion.y);
+                if (mode_ == AppMode::MainMenu) {
+                    updateMenuHover();
+                }
                 if (dragging_) {
                     dragEnd_ = mouse_;
                 }
@@ -358,10 +459,31 @@ private:
             pendingAction_ = PendingAction::AttackMove;
         } else if (key == SDLK_R) {
             placingOwner_ = Owner::Red;
+            editorTool_ = EditorTool::Unit;
             placing_ = true;
         } else if (key == SDLK_B) {
             placingOwner_ = Owner::Blue;
+            editorTool_ = EditorTool::Unit;
             placing_ = true;
+        } else if (key == SDLK_T) {
+            editorTool_ = editorTool_ == EditorTool::Terrain ? EditorTool::Unit : EditorTool::Terrain;
+            placing_ = false;
+        }
+    }
+
+    void updateMenuHover() {
+        int hovered = -1;
+        for (std::size_t index = 0; index < menuButtons_.size(); ++index) {
+            if (menuButtons_[index].rect.contains(mouse_.x, mouse_.y)) {
+                hovered = static_cast<int>(index);
+                break;
+            }
+        }
+        if (hovered != hoveredMenuButton_) {
+            if (hovered >= 0) {
+                audio_.play(AudioCue::MenuHover);
+            }
+            hoveredMenuButton_ = hovered;
         }
     }
 
@@ -373,6 +495,7 @@ private:
             for (std::size_t i = 0; i < menuButtons_.size(); ++i) {
                 if (menuButtons_[i].rect.contains(mouse_.x, mouse_.y)) {
                     pressedMenuButton_ = static_cast<int>(i);
+                    audio_.play(AudioCue::MenuClick);
                     return;
                 }
             }
@@ -419,6 +542,9 @@ private:
         } else if (inWorld(mouse_)) {
             simulation_->selectSingle(screenToGrid(mouse_));
             pendingAction_ = PendingAction::None;
+            if (selectedEntity() != nullptr) {
+                audio_.play(AudioCue::UnitSelect);
+            }
         }
     }
 
@@ -434,17 +560,30 @@ private:
     }
 
     bool handleEditorUiClick() {
-        if (mouse_.y >= 158.0F && mouse_.y <= 200.0F && mouse_.x >= 1520.0F && mouse_.x < 1900.0F) {
+        if (Rect{17.0F, 121.0F, 60.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+            strategicCollapsed_ = !strategicCollapsed_;
+            audio_.play(AudioCue::MenuClick);
+            return true;
+        }
+        if (mouse_.y >= 144.0F && mouse_.y <= 186.0F && mouse_.x >= 1520.0F && mouse_.x < 1900.0F) {
             activeTab_ = std::clamp(static_cast<int>((mouse_.x - 1520.0F) / 96.0F), 0, 3);
+            audio_.play(AudioCue::MenuClick);
+            return true;
+        }
+        if (mouse_.y >= 216.0F && mouse_.y <= 258.0F && mouse_.x >= 1520.0F && mouse_.x < 1894.0F) {
+            activeProducer_ = std::clamp(static_cast<int>((mouse_.x - 1520.0F) / 126.0F), 0, 2);
+            audio_.play(AudioCue::MenuClick);
             return true;
         }
         if (Rect{1510.0F, 70.0F, 190.0F, 46.0F}.contains(mouse_.x, mouse_.y)) {
             placingOwner_ = Owner::Red;
+            editorTool_ = EditorTool::Unit;
             placing_ = true;
             return true;
         }
         if (Rect{1710.0F, 70.0F, 190.0F, 46.0F}.contains(mouse_.x, mouse_.y)) {
             placingOwner_ = Owner::Blue;
+            editorTool_ = EditorTool::Unit;
             placing_ = true;
             return true;
         }
@@ -455,7 +594,7 @@ private:
         const Rect card{1518.0F, 850.0F, 382.0F, 188.0F};
         if (card.contains(mouse_.x, mouse_.y)) {
             const int column = static_cast<int>((mouse_.x - card.x) / 76.0F);
-            const int row = static_cast<int>((mouse_.y - card.y) / 58.0F);
+            const int row = static_cast<int>((mouse_.y - 878.0F) / 52.0F);
             if (column >= 0 && column < 5 && row >= 0 && row < 3) {
                 const int slot = row * 5 + column;
                 if (slot == 0) {
@@ -466,7 +605,7 @@ private:
                     simulation_->issueHold();
                 } else if (slot == 3) {
                     pendingAction_ = PendingAction::Patrol;
-                } else if (slot == 4 || slot == 9) {
+                } else if (slot == 4) {
                     pendingAction_ = PendingAction::AttackMove;
                 }
                 return true;
@@ -483,24 +622,43 @@ private:
         const GridCoord destination = screenToGrid(position);
         if (action == PendingAction::Move) {
             simulation_->issueMove(destination);
+            audio_.play(AudioCue::UnitMove);
         } else if (action == PendingAction::Patrol) {
             simulation_->issuePatrol(destination);
+            audio_.play(AudioCue::UnitMove);
         } else if (action == PendingAction::AttackMove) {
             simulation_->issueAttackMove(destination);
+            audio_.play(AudioCue::UnitMove);
         } else if (action == PendingAction::Attack) {
             const std::uint32_t target = unitAt(position);
             if (target != 0) {
                 simulation_->issueAttack(target);
+                audio_.play(AudioCue::UnitAttack);
             }
         } else {
             const std::uint32_t target = unitAt(position);
             if (target != 0) {
                 simulation_->issueAttack(target);
+                audio_.play(AudioCue::UnitAttack);
             } else {
                 simulation_->issueMove(destination);
+                audio_.play(AudioCue::UnitMove);
             }
         }
         pendingAction_ = PendingAction::None;
+    }
+
+    void playSimulationAudio() {
+        for (const auto& entity : simulation_->entities()) {
+            auto [it, inserted] = seenAttackEvents_.try_emplace(entity.id, entity.attackEvent);
+            if (inserted) {
+                continue;
+            }
+            if (entity.attackEvent > it->second) {
+                audio_.play(AudioCue::UnitAttack);
+                it->second = entity.attackEvent;
+            }
+        }
     }
 
     std::uint32_t unitAt(ScreenCoord position) const {
@@ -520,6 +678,38 @@ private:
             }
         }
         return result;
+    }
+
+    static std::string animationSequence(simulation::AnimationState state) {
+        switch (state) {
+        case simulation::AnimationState::Idle: return "Ready";
+        case simulation::AnimationState::Walk: return "Walk";
+        case simulation::AnimationState::Attack: return "Fire";
+        case simulation::AnimationState::Death: return "Death";
+        }
+        return "Ready";
+    }
+
+    std::wstring animationLabel(simulation::AnimationState state) const {
+        switch (state) {
+        case simulation::AnimationState::Idle: return T("animation_idle");
+        case simulation::AnimationState::Walk: return T("animation_walk");
+        case simulation::AnimationState::Attack: return T("animation_attack");
+        case simulation::AnimationState::Death: return T("animation_death");
+        }
+        return T("animation_idle");
+    }
+
+    const simulation::Entity* previewEntity() const {
+        if (const simulation::Entity* selected = selectedEntity(); selected != nullptr) {
+            return selected;
+        }
+        for (const auto& entity : simulation_->entities()) {
+            if (entity.health > 0) {
+                return &entity;
+            }
+        }
+        return nullptr;
     }
 
     void render() {
@@ -573,21 +763,33 @@ private:
 
     void renderPerformanceOverlay() {
         const auto& renderStats = renderer_.statistics();
-        renderer_.drawRect({24.0F, 62.0F, 460.0F, 142.0F}, {0.01F, 0.02F, 0.025F, 0.92F});
-        renderer_.drawBorder({24.0F, 62.0F, 460.0F, 142.0F}, {0.35F, 0.80F, 0.55F, 0.95F}, 2.0F);
+        renderer_.drawRect({24.0F, 62.0F, 620.0F, 228.0F}, {0.01F, 0.02F, 0.025F, 0.94F});
+        renderer_.drawBorder({24.0F, 62.0F, 620.0F, 228.0F}, {0.35F, 0.80F, 0.55F, 0.95F}, 2.0F);
         renderer_.drawText(L"PERFORMANCE [F3] / VSYNC [F4]", {42.0F, 72.0F, 420.0F, 24.0F}, 17,
             {0.45F, 1.0F, 0.60F, 1.0F}, false);
         renderer_.drawText(L"FPS " + formatNumber(performance_.averageFps) + L"   FRAME " +
             formatNumber(performance_.frameTimeMs) + L" ms   P95 " + formatNumber(performance_.p95FrameTimeMs) + L" ms",
-            {42.0F, 102.0F, 420.0F, 24.0F}, 15, {0.85F, 0.90F, 0.88F, 1.0F}, false);
+            {42.0F, 102.0F, 580.0F, 24.0F}, 15, {0.85F, 0.90F, 0.88F, 1.0F}, false);
         renderer_.drawText(L"SIM " + formatNumber(performance_.simulationTimeMs) + L" ms   RENDER " +
             formatNumber(performance_.renderCpuTimeMs) + L" ms   DRAWS " + std::to_wstring(renderStats.drawCalls),
-            {42.0F, 128.0F, 420.0F, 24.0F}, 15, {0.85F, 0.90F, 0.88F, 1.0F}, false);
+            {42.0F, 128.0F, 580.0F, 24.0F}, 15, {0.85F, 0.90F, 0.88F, 1.0F}, false);
         renderer_.drawText(L"TILES " + std::to_wstring(renderStats.visibleTiles) + L"   ENTITIES " +
             std::to_wstring(renderStats.visibleEntities) + L"   LAYOUTS " +
             std::to_wstring(renderStats.textLayoutUpdates) + L"   UPLOADS " +
-            std::to_wstring(renderStats.textureUploadCount), {42.0F, 154.0F, 420.0F, 24.0F}, 15,
+            std::to_wstring(renderStats.textureUploadCount), {42.0F, 154.0F, 580.0F, 24.0F}, 15,
             {0.85F, 0.90F, 0.88F, 1.0F}, false);
+        const auto* debugEntity = previewEntity();
+        if (debugEntity != nullptr) {
+            renderer_.drawText(L"ASSET E2 / CONS.SHP   FACINGS 8   SEQUENCE " +
+                utf8ToWide(animationSequence(debugEntity->animationState)) +
+                L"   DIR " + std::to_wstring(debugEntity->facing) + L"   FRAME " +
+                std::to_wstring(debugEntity->animationFrame), {42.0F, 180.0F, 580.0F, 24.0F}, 14,
+                {1.0F, 0.82F, 0.28F, 1.0F}, false);
+        }
+        renderer_.drawText(L"MOUSE " + std::to_wstring(static_cast<int>(mouse_.x)) + L"," +
+            std::to_wstring(static_cast<int>(mouse_.y)) + L"   SELECTED " +
+            std::to_wstring(selectedEntity() != nullptr ? 1 : 0), {42.0F, 206.0F, 580.0F, 24.0F}, 14,
+            {0.72F, 0.90F, 0.80F, 1.0F}, false);
     }
 
     void renderMainMenu() {
@@ -606,12 +808,43 @@ private:
         renderer_.drawText(L"RED COMMAND CONSOLE  //  C++23 / SDL3 / D3D11", {94.0F, 1008.0F, 980.0F, 28.0F}, 16, {0.72F, 0.34F, 0.18F, 1.0F}, false);
     }
 
+    void drawHudPanel(Rect panel, const std::wstring& title) {
+        renderer_.drawRect(panel, {0.018F, 0.023F, 0.030F, 0.99F});
+        renderer_.drawBorder(panel, {0.67F, 0.47F, 0.17F, 1.0F}, 3.0F);
+        renderer_.drawText(title, {panel.x + 12.0F, panel.y + 7.0F, panel.width - 24.0F, 26.0F}, 16,
+            {1.0F, 0.82F, 0.20F, 1.0F}, false);
+    }
+
+    void renderMiniMap(Rect panel) {
+        drawHudPanel(panel, T("minimap"));
+        const Rect field{panel.x + 14.0F, panel.y + 38.0F, panel.width - 28.0F, panel.height - 52.0F};
+        renderer_.drawRect(field, {0.025F, 0.10F, 0.065F, 1.0F});
+        for (int index = 1; index < 8; ++index) {
+            const float x = field.x + field.width * static_cast<float>(index) / 8.0F;
+            const float y = field.y + field.height * static_cast<float>(index) / 8.0F;
+            renderer_.drawLine({x, field.y}, {x, field.y + field.height}, {0.08F, 0.20F, 0.22F, 0.7F}, 1.0F);
+            renderer_.drawLine({field.x, y}, {field.x + field.width, y}, {0.08F, 0.20F, 0.22F, 0.7F}, 1.0F);
+        }
+        for (const auto& entity : simulation_->entities()) {
+            if (entity.health <= 0) {
+                continue;
+            }
+            const float normalizedX = std::clamp(entity.position.x / 64.0F, 0.0F, 1.0F);
+            const float normalizedY = std::clamp(entity.position.y / 64.0F, 0.0F, 1.0F);
+            const Color color = entity.owner == Owner::Red ? Color{1.0F, 0.12F, 0.08F, 1.0F} :
+                Color{0.20F, 0.55F, 1.0F, 1.0F};
+            renderer_.drawRect({field.x + normalizedX * field.width - 4.0F,
+                field.y + normalizedY * field.height - 4.0F, 8.0F, 8.0F}, color);
+        }
+    }
+
     void renderEditor() {
         renderer_.setWorldStats(terrainTileCount_, simulation_->entities().size());
         renderer_.drawRect({0.0F, 0.0F, kLogicalWidth, kLogicalHeight}, {0.008F, 0.012F, 0.018F, 1.0F});
-        renderer_.drawRect({100.0F, 50.0F, 1390.0F, 780.0F}, {0.04F, 0.07F, 0.05F, 1.0F});
+        const Rect world{100.0F, 50.0F, 1390.0F, 780.0F};
+        renderer_.drawRect(world, {0.04F, 0.07F, 0.05F, 1.0F});
         renderer_.drawStaticTerrain();
-        renderer_.drawBorder({100.0F, 50.0F, 1390.0F, 780.0F}, {0.65F, 0.48F, 0.18F, 1.0F}, 3.0F);
+        renderer_.drawBorder(world, {0.65F, 0.48F, 0.18F, 1.0F}, 3.0F);
 
         for (const auto& entity : simulation_->entities()) {
             if (entity.health <= 0) {
@@ -620,27 +853,43 @@ private:
             const ScreenCoord position = gridToScreen(entity.position);
             if (assetReady_) {
                 renderer_.drawSprite(rules_.e2().image, "unittem", static_cast<std::size_t>(art_.frameIndex(
-                    rules_.e2().image, "Walk", simulation_->animationFrame())), entity.owner, position, 0.72F);
+                    rules_.e2().image, animationSequence(entity.animationState), entity.animationFrame,
+                    entity.facing)), entity.owner, position, 0.72F);
             }
             if (entity.selected) {
-                renderer_.drawBorder({position.x - 22.0F, position.y - 8.0F, 44.0F, 16.0F}, {0.95F, 0.85F, 0.25F, 1.0F}, 2.0F);
+                renderer_.drawBorder({position.x - 22.0F, position.y - 8.0F, 44.0F, 16.0F},
+                    {0.95F, 0.85F, 0.25F, 1.0F}, 2.0F);
             }
-            const float healthRatio = std::clamp(static_cast<float>(entity.health) / static_cast<float>(entity.maxHealth), 0.0F, 1.0F);
-            renderer_.drawRect({position.x - 22.0F, position.y - 30.0F, 44.0F, 4.0F}, {0.16F, 0.02F, 0.02F, 1.0F});
+            const float healthRatio = std::clamp(static_cast<float>(entity.health) /
+                static_cast<float>(entity.maxHealth), 0.0F, 1.0F);
+            renderer_.drawRect({position.x - 22.0F, position.y - 30.0F, 44.0F, 4.0F},
+                {0.16F, 0.02F, 0.02F, 1.0F});
             renderer_.drawRect({position.x - 22.0F, position.y - 30.0F, 44.0F * healthRatio, 4.0F},
-                entity.owner == Owner::Red ? Color{0.95F, 0.10F, 0.06F, 1.0F} : Color{0.18F, 0.48F, 1.0F, 1.0F});
+                entity.owner == Owner::Red ? Color{0.95F, 0.10F, 0.06F, 1.0F} :
+                Color{0.18F, 0.48F, 1.0F, 1.0F});
         }
 
-        renderer_.drawRect({0.0F, 105.0F, 94.0F, 670.0F}, {0.025F, 0.035F, 0.045F, 0.98F});
+        const Rect strategicRail{0.0F, 105.0F, 94.0F, 670.0F};
+        renderer_.drawRect(strategicRail, {0.025F, 0.035F, 0.045F, 0.98F});
         renderer_.drawImage("ui.hud.leftbar", {0.0F, 105.0F, 24.0F, 670.0F});
         renderer_.drawImage("ui.hud.leftbar", {70.0F, 105.0F, 24.0F, 670.0F});
         renderer_.drawBorder({8.0F, 114.0F, 78.0F, 650.0F}, {0.64F, 0.42F, 0.16F, 1.0F}, 2.0F);
-        renderer_.drawText(T("strategic"), {12.0F, 128.0F, 70.0F, 40.0F}, 15, {1.0F, 0.82F, 0.20F, 1.0F});
-        for (int i = 0; i < 5; ++i) {
-            const Rect ability{18.0F, 184.0F + i * 106.0F, 58.0F, 86.0F};
-            renderer_.drawImage("ui.hud.button", ability);
-            renderer_.drawImage("ui.hud.ability", {ability.x + 4.0F, ability.y + 4.0F, 50.0F, 50.0F});
-            renderer_.drawText(std::to_wstring(i + 1), {ability.x, ability.y + 48.0F, ability.width, 22.0F}, 14, {0.8F, 0.78F, 0.45F, 1.0F});
+        const Rect collapseButton{17.0F, 121.0F, 60.0F, 38.0F};
+        renderer_.drawImage("ui.hud.button", collapseButton);
+        renderer_.drawText(strategicCollapsed_ ? T("expand") : T("collapse"), collapseButton, 12,
+            {1.0F, 0.82F, 0.20F, 1.0F});
+        if (!strategicCollapsed_) {
+            renderer_.drawText(T("strategic"), {12.0F, 164.0F, 70.0F, 34.0F}, 14,
+                {1.0F, 0.82F, 0.20F, 1.0F});
+            const std::string abilityKeys[] = {"ability_airdrop", "ability_nuke", "ability_satellite",
+                "ability_genetic", "ability_iron_curtain"};
+            for (int index = 0; index < 5; ++index) {
+                const Rect ability{18.0F, 202.0F + index * 108.0F, 58.0F, 92.0F};
+                renderer_.drawImage("ui.hud.button", ability);
+                renderer_.drawImage("ui.hud.ability", {ability.x + 4.0F, ability.y + 4.0F, 50.0F, 50.0F});
+                renderer_.drawText(T(abilityKeys[index]), {ability.x + 2.0F, ability.y + 57.0F,
+                    ability.width - 4.0F, 30.0F}, 10, {0.92F, 0.80F, 0.36F, 1.0F});
+            }
         }
 
         const Rect side{1500.0F, 40.0F, 420.0F, 785.0F};
@@ -649,61 +898,110 @@ private:
         renderer_.drawImage("ui.hud.rightbar", {1896.0F, 40.0F, 24.0F, 785.0F});
         renderer_.drawBorder(side, {0.75F, 0.55F, 0.18F, 1.0F}, 4.0F);
         renderer_.drawText(L"10000", {1630.0F, 45.0F, 155.0F, 36.0F}, 28, {1.0F, 0.84F, 0.20F, 1.0F});
-        renderer_.drawText(T("production"), {1520.0F, 120.0F, 370.0F, 30.0F}, 20, {0.95F, 0.78F, 0.22F, 1.0F});
+        renderer_.drawText(T("red"), {1510.0F, 70.0F, 190.0F, 34.0F}, 19, {1.0F, 0.30F, 0.18F, 1.0F});
+        renderer_.drawText(T("blue"), {1710.0F, 70.0F, 190.0F, 34.0F}, 19, {0.32F, 0.58F, 1.0F, 1.0F});
+        renderer_.drawText(T("production"), {1520.0F, 108.0F, 370.0F, 30.0F}, 20,
+            {0.95F, 0.78F, 0.22F, 1.0F});
         const std::string tabs[] = {"building", "defense", "infantry", "vehicles"};
-        for (int i = 0; i < 4; ++i) {
-            const Rect tab{1520.0F + i * 96.0F, 158.0F, 88.0F, 42.0F};
-            renderer_.drawImage(i == activeTab_ ? "ui.hud.tab_hover" : "ui.hud.tab", tab);
-            renderer_.drawText(T(tabs[i]), tab, 17, {1.0F, 0.82F, 0.20F, 1.0F});
+        for (int index = 0; index < 4; ++index) {
+            const Rect tab{1520.0F + index * 96.0F, 144.0F, 88.0F, 42.0F};
+            renderer_.drawImage(index == activeTab_ ? "ui.hud.tab_hover" : "ui.hud.tab", tab);
+            renderer_.drawText(T(tabs[index]), tab, 16, {1.0F, 0.82F, 0.20F, 1.0F});
         }
-        for (int i = 0; i < 12; ++i) {
-            const int column = i % 3;
-            const int row = i / 3;
-            const Rect product{1528.0F + column * 122.0F, 220.0F + row * 95.0F, 108.0F, 80.0F};
+        renderer_.drawText(T("producer"), {1520.0F, 191.0F, 370.0F, 26.0F}, 16,
+            {0.86F, 0.68F, 0.22F, 1.0F});
+        const std::string producerKeys[] = {"producer_1", "producer_2", "producer_3"};
+        for (int index = 0; index < 3; ++index) {
+            const Rect producer{1520.0F + index * 126.0F, 216.0F, 118.0F, 42.0F};
+            renderer_.drawImage(index == activeProducer_ ? "ui.hud.tab_hover" : "ui.hud.tab", producer);
+            renderer_.drawText(T(producerKeys[index]), producer, 15, {1.0F, 0.82F, 0.20F, 1.0F});
+        }
+        for (int index = 0; index < 12; ++index) {
+            const int column = index % 3;
+            const int row = index / 3;
+            const Rect product{1528.0F + column * 122.0F, 275.0F + row * 95.0F, 108.0F, 80.0F};
             renderer_.drawImage("ui.hud.button", product);
-            renderer_.drawText(L"--", {product.x, product.y + 12.0F, product.width, 28.0F}, 24, {0.42F, 0.44F, 0.48F, 1.0F});
+            renderer_.drawText(L"--", {product.x, product.y + 12.0F, product.width, 28.0F}, 24,
+                {0.42F, 0.44F, 0.48F, 1.0F});
         }
-        renderer_.drawText(T("red"), {1510.0F, 70.0F, 190.0F, 46.0F}, 19, {1.0F, 0.30F, 0.18F, 1.0F});
-        renderer_.drawText(T("blue"), {1710.0F, 70.0F, 190.0F, 46.0F}, 19, {0.32F, 0.58F, 1.0F, 1.0F});
 
-        const Rect hud{100.0F, 842.0F, 1390.0F, 220.0F};
-        renderer_.drawRect(hud, {0.025F, 0.028F, 0.032F, 0.99F});
-        renderer_.drawBorder(hud, {0.65F, 0.46F, 0.16F, 1.0F}, 4.0F);
+        const Rect hudBackground{0.0F, 842.0F, 1920.0F, 238.0F};
+        renderer_.drawRect(hudBackground, {0.012F, 0.016F, 0.022F, 1.0F});
+        const Rect miniMap{8.0F, 850.0F, 320.0F, 220.0F};
+        const Rect model{336.0F, 850.0F, 200.0F, 220.0F};
+        const Rect info{544.0F, 850.0F, 490.0F, 220.0F};
+        const Rect portrait{1042.0F, 850.0F, 466.0F, 220.0F};
+        renderMiniMap(miniMap);
+        drawHudPanel(model, T("unit_model"));
+        drawHudPanel(info, T("unit_info"));
+        drawHudPanel(portrait, T("portrait"));
         const auto selected = selectedEntity();
-        renderer_.drawText(selected == nullptr ? L"NO UNIT SELECTED" : T("unit_name"), {140.0F, 860.0F, 680.0F, 34.0F}, 25, {1.0F, 0.82F, 0.20F, 1.0F}, false);
-        renderer_.drawText(selected == nullptr ? L"OWNER --" : T("owner") + L": " + ownerText(selected->owner), {140.0F, 906.0F, 520.0F, 28.0F}, 19, {0.8F, 0.8F, 0.74F, 1.0F}, false);
-        if (selected != nullptr) {
-            renderer_.drawText(T("health") + L": " + std::to_wstring(selected->health) + L" / " + std::to_wstring(selected->maxHealth), {140.0F, 940.0F, 520.0F, 28.0F}, 19, {0.36F, 1.0F, 0.36F, 1.0F}, false);
-            renderer_.drawText(T("weapon") + L": M1Carbine   " + T("armor") + L": " + utf8ToWide(rules_.e2().armorType), {140.0F, 974.0F, 720.0F, 28.0F}, 18, {0.72F, 0.75F, 0.82F, 1.0F}, false);
-            if (assetReady_) {
-                renderer_.drawSprite(rules_.e2().image, "unittem", static_cast<std::size_t>(art_.frameIndex(
-                    rules_.e2().image, "Ready", 0)), selected->owner, {1145.0F, 965.0F}, 0.95F);
-            }
+        const auto preview = previewEntity();
+        const Rect modelViewport{348.0F, 888.0F, 176.0F, 168.0F};
+        const Rect portraitViewport{1056.0F, 888.0F, 438.0F, 168.0F};
+        renderer_.drawRect(modelViewport, {0.005F, 0.008F, 0.012F, 1.0F});
+        renderer_.drawRect(portraitViewport, {0.005F, 0.008F, 0.012F, 1.0F});
+        if (preview != nullptr && assetReady_) {
+            const std::size_t frame = static_cast<std::size_t>(art_.frameIndex(rules_.e2().image,
+                animationSequence(preview->animationState), preview->animationFrame, preview->facing));
+            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner, {436.0F, 1005.0F}, 0.82F);
+            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner, {1275.0F, 1005.0F}, 0.90F);
+            renderer_.drawText(animationLabel(preview->animationState) + L"  /  DIR " +
+                std::to_wstring(preview->facing), {1300.0F, 918.0F, 170.0F, 30.0F}, 15,
+                {1.0F, 0.82F, 0.20F, 1.0F}, false);
+        } else {
+            renderer_.drawText(L"--", modelViewport, 28, {0.42F, 0.44F, 0.48F, 1.0F});
+            renderer_.drawText(L"--", portraitViewport, 28, {0.42F, 0.44F, 0.48F, 1.0F});
         }
-        renderer_.drawText(T("runtime"), {860.0F, 1026.0F, 440.0F, 24.0F}, 15, {0.3F, 0.9F, 0.4F, 1.0F});
-        if (!assetReady_) {
-            renderer_.drawText(assetError_.empty() ? T("asset_missing") : assetError_, {150.0F, 1005.0F, 760.0F, 26.0F}, 14, {1.0F, 0.25F, 0.16F, 1.0F}, false);
+        if (selected == nullptr) {
+            renderer_.drawText(L"未选择单位", {560.0F, 896.0F, 420.0F, 30.0F}, 22,
+                {1.0F, 0.82F, 0.20F, 1.0F}, false);
+        } else {
+            renderer_.drawText(T("unit_name"), {560.0F, 890.0F, 430.0F, 32.0F}, 24,
+                {1.0F, 0.82F, 0.20F, 1.0F}, false);
+            renderer_.drawText(T("owner") + L": " + ownerText(selected->owner), {560.0F, 930.0F, 430.0F, 28.0F}, 18,
+                {0.82F, 0.82F, 0.78F, 1.0F}, false);
+            renderer_.drawText(T("weapon") + L": " + T("weapon_name"), {560.0F, 966.0F, 430.0F, 28.0F}, 18,
+                {0.82F, 0.82F, 0.78F, 1.0F}, false);
+            renderer_.drawText(T("armor") + L": " + T("armor_name"), {560.0F, 1002.0F, 430.0F, 28.0F}, 18,
+                {0.82F, 0.82F, 0.78F, 1.0F}, false);
+            renderer_.drawText(T("health") + L": " + std::to_wstring(selected->health) + L" / " +
+                std::to_wstring(selected->maxHealth), {560.0F, 1038.0F, 430.0F, 28.0F}, 18,
+                {0.36F, 1.0F, 0.36F, 1.0F}, false);
         }
+
         const Rect card{1518.0F, 850.0F, 382.0F, 188.0F};
-        renderer_.drawRect(card, {0.018F, 0.022F, 0.028F, 1.0F});
-        renderer_.drawBorder(card, {0.75F, 0.50F, 0.16F, 1.0F}, 3.0F);
+        drawHudPanel(card, L"COMMAND CARD  3 x 5");
         const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "", "", "", "", "", "", "", "", "", ""};
         for (int slot = 0; slot < 15; ++slot) {
             const int column = slot % 5;
             const int row = slot / 5;
-            const Rect button{1523.0F + column * 76.0F, 855.0F + row * 58.0F, 72.0F, 54.0F};
+            const Rect button{1523.0F + column * 76.0F, 878.0F + row * 52.0F, 72.0F, 48.0F};
             const bool hot = button.contains(mouse_.x, mouse_.y);
             renderer_.drawImage(hot ? "ui.hud.button_hover" : "ui.hud.button", button);
             if (!commandKeys[slot].empty()) {
-                renderer_.drawText(T(commandKeys[slot]), button, 14, {1.0F, 0.84F, 0.26F, 1.0F});
+                const int fontSize = slot == 4 ? 9 : 13;
+                renderer_.drawText(T(commandKeys[slot]), button, fontSize, {1.0F, 0.84F, 0.26F, 1.0F});
             }
         }
-        renderer_.drawText(T("editor_title"), {116.0F, 10.0F, 320.0F, 30.0F}, 21, {1.0F, 0.82F, 0.20F, 1.0F}, false);
-        renderer_.drawText(T("editor_hint"), {410.0F, 10.0F, 1260.0F, 30.0F}, 15, {0.65F, 0.68F, 0.70F, 1.0F}, false);
-        renderer_.drawText(L"MENU", {1820.0F, 8.0F, 90.0F, 40.0F}, 17, {1.0F, 0.84F, 0.24F, 1.0F});
+
+        renderer_.drawText(T("editor_title"), {116.0F, 10.0F, 280.0F, 30.0F}, 21,
+            {1.0F, 0.82F, 0.20F, 1.0F}, false);
+        const std::wstring toolName = editorTool_ == EditorTool::Terrain ? T("terrain") : T("unit");
+        const std::wstring ownerName = editorTool_ == EditorTool::Unit ? ownerText(placingOwner_) : L"--";
+        const std::wstring modeName = placing_ ? T("place") : T("select");
+        renderer_.drawText(T("tool") + L": " + toolName + L"  |  " + T("object") + L": E2  |  " +
+            T("owner") + L": " + ownerName + L"  |  " + T("mode") + L": " + modeName,
+            {410.0F, 10.0F, 1350.0F, 30.0F}, 15, {0.80F, 0.82F, 0.82F, 1.0F}, false);
+        renderer_.drawText(T("editor_hint") + L"   T 工具", {410.0F, 34.0F, 1350.0F, 24.0F}, 13,
+            {0.58F, 0.62F, 0.66F, 1.0F}, false);
+        renderer_.drawText(L"MENU", {1820.0F, 8.0F, 90.0F, 40.0F}, 17,
+            {1.0F, 0.84F, 0.24F, 1.0F});
         if (placing_) {
-            renderer_.drawBorder({100.0F, 50.0F, 1390.0F, 780.0F}, placingOwner_ == Owner::Red ? Color{1.0F, 0.12F, 0.08F, 1.0F} : Color{0.18F, 0.45F, 1.0F, 1.0F}, 5.0F);
-            renderer_.drawText(placingOwner_ == Owner::Red ? T("place_red") : T("place_blue"), {580.0F, 72.0F, 420.0F, 34.0F}, 20, {1.0F, 0.82F, 0.20F, 1.0F});
+            renderer_.drawBorder(world, placingOwner_ == Owner::Red ? Color{1.0F, 0.12F, 0.08F, 1.0F} :
+                Color{0.18F, 0.45F, 1.0F, 1.0F}, 5.0F);
+            renderer_.drawText(placingOwner_ == Owner::Red ? T("place_red") : T("place_blue"),
+                {580.0F, 72.0F, 420.0F, 34.0F}, 20, {1.0F, 0.82F, 0.20F, 1.0F});
         }
         if (dragging_) {
             const Rect selection{std::min(dragStart_.x, dragEnd_.x), std::min(dragStart_.y, dragEnd_.y),
@@ -733,20 +1031,26 @@ private:
     westwood::Palette palette_;
     westwood::ShpTsDocument sprite_;
     std::unique_ptr<simulation::Simulation> simulation_;
+    AudioService audio_;
+    std::unordered_map<std::uint32_t, std::uint32_t> seenAttackEvents_;
     std::unordered_map<std::string, std::wstring> strings_;
     std::wstring assetError_;
     std::wstring toast_;
     std::filesystem::path contentRoot_;
     PerformanceTracker performance_;
     AppMode mode_ = AppMode::MainMenu;
+    EditorTool editorTool_ = EditorTool::Unit;
     PendingAction pendingAction_ = PendingAction::None;
     Owner placingOwner_ = Owner::Red;
     bool running_ = true;
     bool assetReady_ = false;
     bool placing_ = false;
     bool dragging_ = false;
+    bool strategicCollapsed_ = false;
     int activeTab_ = 0;
+    int activeProducer_ = 0;
     int pressedMenuButton_ = -1;
+    int hoveredMenuButton_ = -1;
     float toastTime_ = 0.0F;
     ScreenCoord mouse_{};
     ScreenCoord dragStart_{};
@@ -754,15 +1058,15 @@ private:
     IsoProjection projection_{kTileWidth, kTileHeight, {790.0F, 440.0F}};
     std::size_t terrainTileCount_ = 0;
     std::vector<MenuButton> menuButtons_ = {
-        {"campaign", "ui.main.button", "ui.main.button_hover", {1500.0F, 166.0F, 335.0F, 76.0F}},
-        {"load", "ui.main.button", "ui.main.button_hover", {1500.0F, 250.0F, 335.0F, 76.0F}},
-        {"skirmish", "ui.main.button", "ui.main.button_hover", {1500.0F, 334.0F, 335.0F, 76.0F}},
-        {"online", "ui.main.button", "ui.main.button_hover", {1500.0F, 418.0F, 335.0F, 76.0F}},
-        {"lan", "ui.main.button", "ui.main.button_hover", {1500.0F, 502.0F, 335.0F, 76.0F}},
-        {"settings", "ui.main.button", "ui.main.button_hover", {1500.0F, 586.0F, 335.0F, 76.0F}},
-        {"statistics", "ui.main.button", "ui.main.button_hover", {1500.0F, 670.0F, 335.0F, 76.0F}},
-        {"editor", "ui.main.button", "ui.main.button_hover", {1500.0F, 754.0F, 335.0F, 76.0F}},
-        {"exit", "ui.main.button", "ui.main.button_hover", {1500.0F, 838.0F, 335.0F, 76.0F}},
+        {"campaign", "ui.main.button", "ui.main.button_hover", {1530.0F, 260.0F, 330.0F, 78.0F}},
+        {"load", "ui.main.button", "ui.main.button_hover", {1530.0F, 346.0F, 330.0F, 78.0F}},
+        {"skirmish", "ui.main.button", "ui.main.button_hover", {1530.0F, 432.0F, 330.0F, 78.0F}},
+        {"online", "ui.main.button", "ui.main.button_hover", {1530.0F, 518.0F, 330.0F, 78.0F}},
+        {"lan", "ui.main.button", "ui.main.button_hover", {1530.0F, 604.0F, 330.0F, 78.0F}},
+        {"settings", "ui.main.button", "ui.main.button_hover", {1530.0F, 690.0F, 330.0F, 78.0F}},
+        {"statistics", "ui.main.button", "ui.main.button_hover", {1530.0F, 776.0F, 330.0F, 78.0F}},
+        {"editor", "ui.main.button", "ui.main.button_hover", {1530.0F, 862.0F, 330.0F, 78.0F}},
+        {"exit", "ui.main.button", "ui.main.button_hover", {1530.0F, 948.0F, 330.0F, 78.0F}},
     };
 };
 

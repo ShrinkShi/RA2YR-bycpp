@@ -218,6 +218,7 @@ D3D11Renderer::~D3D11Renderer() {
 
 bool D3D11Renderer::initialize(SDL_Window* window, std::string& error) {
     window_ = window;
+    SDL_GetWindowSize(window_, &viewportWidth_, &viewportHeight_);
     SDL_GetWindowSizeInPixels(window_, &pixelWidth_, &pixelHeight_);
     const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     comInitialized_ = SUCCEEDED(comResult) && comResult != RPC_E_CHANGED_MODE;
@@ -364,8 +365,9 @@ bool D3D11Renderer::createBackBuffer(std::string& error) {
 }
 
 void D3D11Renderer::resize() {
+    SDL_GetWindowSize(window_, &viewportWidth_, &viewportHeight_);
     SDL_GetWindowSizeInPixels(window_, &pixelWidth_, &pixelHeight_);
-    if (pixelWidth_ <= 0 || pixelHeight_ <= 0) {
+    if (pixelWidth_ <= 0 || pixelHeight_ <= 0 || viewportWidth_ <= 0 || viewportHeight_ <= 0) {
         return;
     }
     renderTarget_.Reset();
@@ -466,7 +468,7 @@ void D3D11Renderer::buildStaticTerrain(const std::vector<TerrainTileVisual>& til
 void D3D11Renderer::beginFrame() {
     const float clearColor[] = {0.005F, 0.006F, 0.008F, 1.0F};
     context_->OMSetRenderTargets(1, renderTarget_.GetAddressOf(), nullptr);
-    D3D11_VIEWPORT viewport{0.0F, 0.0F, static_cast<float>(pixelWidth_), static_cast<float>(pixelHeight_), 0.0F, 1.0F};
+    D3D11_VIEWPORT viewport{0.0F, 0.0F, static_cast<float>(viewportWidth_), static_cast<float>(viewportHeight_), 0.0F, 1.0F};
     context_->RSSetViewports(1, &viewport);
     context_->ClearRenderTargetView(renderTarget_.Get(), clearColor);
     solidVertices_.clear();
@@ -736,7 +738,7 @@ void D3D11Renderer::flushText() {
     context_->Flush();
     d2dTarget_->BeginDraw();
     d2dTarget_->SetTransform(D2D1::Matrix3x2F::Scale(
-        static_cast<float>(pixelWidth_) / logicalWidth_, static_cast<float>(pixelHeight_) / logicalHeight_));
+        static_cast<float>(viewportWidth_) / logicalWidth_, static_cast<float>(viewportHeight_) / logicalHeight_));
     for (const TextItem& item : textItems_) {
         IDWriteTextLayout* layout = textLayout(item);
         if (layout == nullptr) {

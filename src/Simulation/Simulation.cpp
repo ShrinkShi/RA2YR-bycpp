@@ -6,6 +6,13 @@
 namespace ra2yr::simulation {
 namespace {
 
+constexpr int kFacingCount = 8;
+constexpr int kWalkFrameCount = 6;
+constexpr int kAttackFrameCount = 6;
+constexpr int kDeathFrameCount = 15;
+constexpr float kAnimationFrameSeconds = 0.08F;
+constexpr float kPi = 3.14159265358979323846F;
+
 WorldCoord toWorld(GridCoord coord) {
     return {static_cast<float>(coord.x), static_cast<float>(coord.y)};
 }
@@ -16,6 +23,18 @@ GridCoord toGrid(WorldCoord coord) {
 
 bool hostile(Owner first, Owner second) {
     return first != Owner::Neutral && second != Owner::Neutral && first != second;
+}
+
+int facingFromDelta(float dx, float dy, int fallback) {
+    if (std::abs(dx) < 0.001F && std::abs(dy) < 0.001F) {
+        return fallback;
+    }
+    int facing = static_cast<int>(std::lround(std::atan2(dy, dx) / (kPi / 4.0F)));
+    facing %= kFacingCount;
+    if (facing < 0) {
+        facing += kFacingCount;
+    }
+    return facing;
 }
 
 } // namespace
@@ -38,18 +57,25 @@ std::uint32_t Simulation::spawn(Owner owner, GridCoord position) {
 }
 
 void Simulation::update(float seconds) {
-    animationTime_ += seconds;
-    while (animationTime_ >= 0.08F) {
-        animationTime_ -= 0.08F;
-        animationFrame_ = (animationFrame_ + 1) % 8;
-    }
+    const float elapsed = std::max(0.0F, seconds);
     for (Entity& entity : entities_) {
         if (isAlive(entity)) {
-            updateEntity(entity, seconds);
+            updateEntity(entity, elapsed);
+        } else {
+            setAnimation(entity, AnimationState::Death);
+            updateAnimation(entity, elapsed);
+        }
+    }
+    for (Entity& entity : entities_) {
+        if (entity.health <= 0) {
+            entity.selected = false;
+            entity.order = {};
+            setAnimation(entity, AnimationState::Death);
         }
     }
     entities_.erase(std::remove_if(entities_.begin(), entities_.end(), [](const Entity& entity) {
-        return entity.health <= 0 && entity.order.kind == CommandKind::None;
+        return entity.health <= 0 && entity.animationState == AnimationState::Death &&
+            entity.animationFrame >= kDeathFrameCount - 1;
     }), entities_.end());
 }
 
@@ -61,13 +87,16 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
     const WorldCoord destination = toWorld(entity.order.destination);
     const bool hasDestination = entity.order.kind == CommandKind::Move ||
         entity.order.kind == CommandKind::Patrol || entity.order.kind == CommandKind::AttackMove;
+    bool moving = false;
     if (hasDestination && distance(entity.position, destination) > 0.12F) {
         const float dx = destination.x - entity.position.x;
         const float dy = destination.y - entity.position.y;
         const float length = std::sqrt(dx * dx + dy * dy);
         const float step = static_cast<float>(entity.speed) * seconds * 0.55F;
+        entity.facing = facingFromDelta(dx, dy, entity.facing);
         entity.position.x += dx / length * std::min(step, length);
         entity.position.y += dy / length * std::min(step, length);
+        moving = true;
     } else if (entity.order.kind == CommandKind::Patrol && entity.patrolPoint.has_value()) {
         std::swap(entity.order.destination, *entity.patrolPoint);
     }
@@ -87,15 +116,56 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
             const float dy = target->position.y - entity.position.y;
             const float length = std::sqrt(dx * dx + dy * dy);
             const float step = static_cast<float>(entity.speed) * seconds * 0.55F;
+            entity.facing = facingFromDelta(dx, dy, entity.facing);
             entity.position.x += dx / length * std::min(step, length);
             entity.position.y += dy / length * std::min(step, length);
+            moving = true;
         } else if (entity.weaponCooldown <= 0.0F) {
+            entity.facing = facingFromDelta(target->position.x - entity.position.x,
+                target->position.y - entity.position.y, entity.facing);
             target->health -= entity.weaponDamage;
             entity.weaponCooldown = 25.0F / 30.0F;
+            ++entity.attackEvent;
             if (target->health <= 0) {
                 target->health = 0;
                 target->order = {};
             }
+        }
+    }
+    if (target != nullptr && isAlive(*target) && distance(entity.position, target->position) <= entity.weaponRange) {
+        setAnimation(entity, AnimationState::Attack);
+    } else if (moving) {
+        setAnimation(entity, AnimationState::Walk);
+    } else {
+        setAnimation(entity, AnimationState::Idle);
+    }
+    updateAnimation(entity, seconds);
+}
+
+void Simulation::setAnimation(Entity& entity, AnimationState state) {
+    if (entity.animationState == state) {
+        return;
+    }
+    entity.animationState = state;
+    entity.animationFrame = 0;
+    entity.animationTime = 0.0F;
+}
+
+void Simulation::updateAnimation(Entity& entity, float seconds) {
+    if (entity.animationState == AnimationState::Death && entity.animationFrame >= kDeathFrameCount - 1) {
+        return;
+    }
+    entity.animationTime += seconds;
+    const int frameCount = entity.animationState == AnimationState::Death ? kDeathFrameCount :
+        entity.animationState == AnimationState::Idle ? 1 :
+        entity.animationState == AnimationState::Walk ? kWalkFrameCount : kAttackFrameCount;
+    while (entity.animationTime >= kAnimationFrameSeconds) {
+        entity.animationTime -= kAnimationFrameSeconds;
+        ++entity.animationFrame;
+        if (entity.animationState == AnimationState::Death) {
+            entity.animationFrame = std::min(entity.animationFrame, frameCount - 1);
+        } else {
+            entity.animationFrame %= frameCount;
         }
     }
 }

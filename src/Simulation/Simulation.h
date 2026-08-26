@@ -9,6 +9,13 @@
 
 namespace ra2yr::simulation {
 
+enum class AnimationState : std::uint8_t {
+    Idle,
+    Walk,
+    Attack,
+    Death,
+};
+
 struct Entity {
     std::uint32_t id = 0;
     Owner owner = Owner::Neutral;
@@ -23,6 +30,11 @@ struct Entity {
     Command order{};
     std::optional<GridCoord> patrolPoint;
     bool selected = false;
+    AnimationState animationState = AnimationState::Idle;
+    int facing = 0;
+    int animationFrame = 0;
+    float animationTime = 0.0F;
+    std::uint32_t attackEvent = 0;
 };
 
 class Simulation {
@@ -46,9 +58,10 @@ public:
     [[nodiscard]] std::vector<Entity>& entities() { return entities_; }
     [[nodiscard]] const Entity* find(std::uint32_t id) const;
     [[nodiscard]] Entity* find(std::uint32_t id);
-    [[nodiscard]] int animationFrame() const { return animationFrame_; }
 
 private:
+    void setAnimation(Entity& entity, AnimationState state);
+    void updateAnimation(Entity& entity, float seconds);
     void applyToSelected(const Command& command);
     void updateEntity(Entity& entity, float seconds);
     [[nodiscard]] Entity* nearestEnemy(const Entity& source, float maxDistance);
@@ -57,8 +70,6 @@ private:
     gamedata::UnitDefinition definition_;
     std::vector<Entity> entities_;
     std::uint32_t nextId_ = 1;
-    float animationTime_ = 0.0F;
-    int animationFrame_ = 0;
 };
 
 } // namespace ra2yr::simulation

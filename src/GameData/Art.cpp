@@ -31,12 +31,9 @@ bool parseSequence(std::string_view value, AnimationSequence& sequence) {
         fields[fieldCount++] = trim(token);
     }
     if (fieldCount < 3 || !parseInt(fields[0], sequence.firstFrame) ||
-        !parseInt(fields[1], sequence.frameCount) || !parseInt(fields[2], sequence.facingCount) ||
-        sequence.firstFrame < 0 || sequence.frameCount <= 0 || sequence.facingCount < 0) {
+        !parseInt(fields[1], sequence.frameCount) || !parseInt(fields[2], sequence.rate) ||
+        sequence.firstFrame < 0 || sequence.frameCount <= 0 || sequence.rate < 0) {
         return false;
-    }
-    if (fieldCount == 4) {
-        sequence.facing = fields[3];
     }
     return true;
 }
@@ -56,7 +53,12 @@ bool ArtDatabase::load(const std::filesystem::path& artPath, std::string& error)
     ArtDefinition cons;
     cons.image = art.get("CONS", "Image", "CONS");
     cons.sequence = art.get("CONS", "Sequence", "ConSequence");
+    cons.facingCount = art.getInt(cons.sequence, "Facings", 8);
     cons.remapable = art.getBool("CONS", "Remapable", false);
+    if (cons.facingCount != 8) {
+        error = "Enhanced Art.ini must define exactly 8 CONS facings";
+        return false;
+    }
     const std::string sequenceKeys[] = {
         "Ready", "Guard", "Walk", "Fire", "FireUp", "Death", "Die1", "Die2", "Prone", "Down", "Up"};
     for (const std::string& key : sequenceKeys) {
@@ -88,7 +90,8 @@ const ArtDefinition* ArtDatabase::find(std::string_view image) const {
     return it == definitions_.end() ? nullptr : &it->second;
 }
 
-int ArtDatabase::frameIndex(std::string_view image, std::string_view sequence, int animationIndex) const {
+int ArtDatabase::frameIndex(std::string_view image, std::string_view sequence, int animationIndex,
+    int facingIndex) const {
     const ArtDefinition* definition = find(image);
     if (definition == nullptr) {
         return 0;
@@ -98,8 +101,26 @@ int ArtDatabase::frameIndex(std::string_view image, std::string_view sequence, i
         return 0;
     }
     const AnimationSequence& value = it->second;
-    const int offset = animationIndex < 0 ? 0 : animationIndex % value.frameCount;
-    return value.firstFrame + offset;
+    const int frame = animationIndex < 0 ? 0 : animationIndex % value.frameCount;
+    int facing = facingIndex % definition->facingCount;
+    if (facing < 0) {
+        facing += definition->facingCount;
+    }
+    return value.firstFrame + facing * value.frameCount + frame;
+}
+
+int ArtDatabase::sequenceFrameCount(std::string_view image, std::string_view sequence) const {
+    const ArtDefinition* definition = find(image);
+    if (definition == nullptr) {
+        return 1;
+    }
+    const auto it = definition->sequences.find(std::string(sequence));
+    return it == definition->sequences.end() ? 1 : it->second.frameCount;
+}
+
+int ArtDatabase::facingCount(std::string_view image) const {
+    const ArtDefinition* definition = find(image);
+    return definition == nullptr ? 1 : definition->facingCount;
 }
 
 } // namespace ra2yr::gamedata

@@ -11,13 +11,13 @@ namespace ra2yr::gamedata {
 struct AnimationSequence {
     int firstFrame = 0;
     int frameCount = 1;
-    int facingCount = 1;
-    std::string facing;
+    int rate = 1;
 };
 
 struct ArtDefinition {
     std::string image;
     std::string sequence;
+    int facingCount = 8;
     bool remapable = false;
     std::unordered_map<std::string, AnimationSequence> sequences;
 };
@@ -28,7 +28,9 @@ public:
 
     [[nodiscard]] const ArtDefinition* find(std::string_view image) const;
     [[nodiscard]] int frameIndex(std::string_view image, std::string_view sequence,
-        int animationIndex = 0) const;
+        int animationIndex = 0, int facingIndex = 0) const;
+    [[nodiscard]] int sequenceFrameCount(std::string_view image, std::string_view sequence) const;
+    [[nodiscard]] int facingCount(std::string_view image) const;
     [[nodiscard]] bool loaded() const { return loaded_; }
 
 private:
