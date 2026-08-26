@@ -265,6 +265,8 @@ P0 通过后，才会继续加入：
 
 大型兼容性资源采用 Git LFS 保存。当前冻结的 corpus 结构以 7 个顶层 MIX 为权威原始件，并额外保存 48 个已解析 nested MIX、关键 INI/CSF 和 13 个官方 `.yro` 地图；TMP/PAL/SHP/VXL/HVA 等大量 leaf asset 由对应 nested MIX 完整承载，避免把同一字节重复存储数倍。所有 corpus 文件都必须通过 SHA-256 manifest 与 fresh-clone LFS materialization 验收。
 
+> 状态说明：以上是 Compatibility Corpus 的历史/可选导入方案（Superseded for the Development Sandbox）。当前首轮编辑器沙盒使用仓库自带的 `INI/` 与 `assets/`，不要求设置 `RA2YR_CORPUS_ROOT`；corpus 继续由独立的 `agent/ra2yr-corpus-lfs` worktree 管理。
+
 ---
 
 ## 给开发者

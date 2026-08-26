@@ -40,6 +40,7 @@ Inviso=yes
     assert(ini.get("E2", "Primary") == "M1Carbine");
     assert(ini.get("InlineSection", "Value") == "ok");
     assert(ini.getBool("InvisibleLow", "Inviso"));
+    assert(ini.hasKey("E2", "Strength"));
 
     const std::filesystem::path contentRoot = std::filesystem::current_path();
     const std::filesystem::path rulesPath = contentRoot / "INI/Rules.ini";
@@ -57,6 +58,9 @@ Inviso=yes
     assert(rules.e2().image == "CONS");
     assert(rules.e2().armorValue == 0 && rules.e2().armorType == "Light");
     assert(rules.e2().selectable && rules.e2().autoAcquire && rules.e2().returnFire);
+    assert(rules.e2().faction == Faction::Soviet);
+    assert(rules.e2().unitTags.size() == 2 && rules.e2().unitTags[0] == "Biological" &&
+        rules.e2().unitTags[1] == "Infantry");
     assert(rules.e2().primary.projectile == "InvisibleLow");
 
     gamedata::ArtDatabase art;
@@ -69,7 +73,21 @@ Inviso=yes
     assert(art.frameIndex("CONS", "Walk") == 8);
     assert(art.frameIndex("CONS", "Walk", 3, 2) == 23);
     assert(art.frameIndex("CONS", "Fire", 5, 7) == 211);
-    assert(art.frameIndex("CONS", "Death", 14, 7) == 253);
+    assert(art.frameIndex("CONS", "Death", 14, 0) == 148);
+    assert(art.frameIndex("CONS", "Death", 14, 7) == 148);
+    assert(art.sequenceIsDirectional("CONS", "Ready"));
+    assert(art.sequenceIsDirectional("CONS", "Walk"));
+    assert(art.sequenceIsDirectional("CONS", "Fire"));
+    assert(!art.sequenceIsDirectional("CONS", "Death"));
+    assert(art.sequenceFrameDelayMs("CONS", "Walk") == 83);
+    assert(art.sequenceLoops("CONS", "Walk"));
+    assert(!art.sequenceLoops("CONS", "Death"));
+    for (int facing = 0; facing < 8; ++facing) {
+        assert(art.frameIndex("CONS", "Ready", 0, facing) == facing);
+        assert(art.frameIndex("CONS", "Walk", 0, facing) == 8 + facing * 6);
+        assert(art.frameIndex("CONS", "Fire", 0, facing) == 164 + facing * 6);
+        assert(art.frameIndex("CONS", "Death", 0, facing) == 134);
+    }
 
     westwood::ShpTsDocument projectShp;
     assert(projectShp.load(spritePath, error));
@@ -107,14 +125,20 @@ Inviso=yes
     assert(shp.frame(0).pixels.size() == 4 && shp.frame(0).pixels[3] == 4);
     std::filesystem::remove(syntheticShp);
 
+    const gamedata::ArtDefinition& animationDefinition = *art.find("CONS");
     gamedata::UnitDefinition definition;
+    definition.id = "E2";
+    definition.faction = Faction::Soviet;
+    definition.unitTags = {"Biological", "Infantry"};
     definition.strength = 60;
     definition.speed = 4;
     definition.primary.damage = 30;
     definition.primary.range = 4.0F;
-    simulation::Simulation simulation(definition);
-    const std::uint32_t red = simulation.spawn(Owner::Red, {0, 0});
-    const std::uint32_t blue = simulation.spawn(Owner::Blue, {8, 0});
+    simulation::Simulation simulation(animationDefinition);
+    const std::uint32_t red = simulation.spawn(definition, Owner::Red, {0, 0});
+    const std::uint32_t blue = simulation.spawn(definition, Owner::Blue, {8, 0});
+    assert(simulation.find(red)->definitionId == "E2");
+    assert(simulation.find(red)->faction == Faction::Soviet);
     simulation.selectSingle({0, 0});
     assert(simulation.find(red)->animationState == simulation::AnimationState::Idle);
     simulation.issueMove({3, 0});
@@ -132,6 +156,63 @@ Inviso=yes
     simulation.update(1.0F);
     simulation.update(1.0F);
     assert(simulation.find(blue) == nullptr || simulation.find(blue)->health < initialHealth);
+
+    gamedata::UnitDefinition alliedDefinition = definition;
+    alliedDefinition.id = "S1";
+    alliedDefinition.faction = Faction::Allied;
+    const std::uint32_t redAllied = simulation.spawn(alliedDefinition, Owner::Red, {30, 30});
+    assert(simulation.find(redAllied)->owner == Owner::Red);
+    assert(simulation.find(redAllied)->faction == Faction::Allied);
+
+    gamedata::UnitDefinition behaviorDefinition = definition;
+    behaviorDefinition.strength = 1000;
+    behaviorDefinition.primary.damage = 10;
+    behaviorDefinition.autoAcquire = true;
+    behaviorDefinition.returnFire = true;
+    simulation::Simulation idleSimulation(animationDefinition);
+    const std::uint32_t idleRed = idleSimulation.spawn(behaviorDefinition, Owner::Red, {0, 0});
+    const std::uint32_t idleBlue = idleSimulation.spawn(behaviorDefinition, Owner::Blue, {3, 0});
+    const int idleBlueHealth = idleSimulation.find(idleBlue)->health;
+    idleSimulation.update(1.0F);
+    assert(idleSimulation.find(idleBlue)->health < idleBlueHealth);
+    assert(idleSimulation.find(idleRed)->animationState == simulation::AnimationState::Attack);
+
+    simulation::Simulation stopSimulation(animationDefinition);
+    const std::uint32_t stopRed = stopSimulation.spawn(behaviorDefinition, Owner::Red, {0, 0});
+    const std::uint32_t stopBlue = stopSimulation.spawn(behaviorDefinition, Owner::Blue, {3, 0});
+    stopSimulation.selectSingle({0, 0});
+    stopSimulation.issueMove({20, 0});
+    stopSimulation.update(0.25F);
+    stopSimulation.selectSingle({static_cast<int>(stopSimulation.find(stopRed)->position.x), 0});
+    stopSimulation.issueStop();
+    const float stoppedX = stopSimulation.find(stopRed)->position.x;
+    const int stopBlueHealth = stopSimulation.find(stopBlue)->health;
+    stopSimulation.update(1.0F);
+    assert(stopSimulation.find(stopRed)->position.x == stoppedX);
+    assert(stopSimulation.find(stopBlue)->health < stopBlueHealth);
+
+    simulation::Simulation holdSimulation(animationDefinition);
+    const std::uint32_t holdRed = holdSimulation.spawn(behaviorDefinition, Owner::Red, {0, 0});
+    const std::uint32_t holdBlue = holdSimulation.spawn(behaviorDefinition, Owner::Blue, {3, 0});
+    holdSimulation.selectSingle({0, 0});
+    holdSimulation.issueHold();
+    const int holdBlueHealth = holdSimulation.find(holdBlue)->health;
+    holdSimulation.update(1.0F);
+    assert(holdSimulation.find(holdRed)->position.x == 0.0F);
+    assert(holdSimulation.find(holdBlue)->health < holdBlueHealth);
+
+    gamedata::UnitDefinition returnFireDefinition = behaviorDefinition;
+    returnFireDefinition.autoAcquire = false;
+    simulation::Simulation returnFireSimulation(animationDefinition);
+    const std::uint32_t returnRed = returnFireSimulation.spawn(returnFireDefinition, Owner::Red, {0, 0});
+    const std::uint32_t returnBlue = returnFireSimulation.spawn(returnFireDefinition, Owner::Blue, {3, 0});
+    returnFireSimulation.selectSingle({3, 0});
+    returnFireSimulation.issueAttack(returnRed);
+    returnFireSimulation.update(1.0F);
+    const int returnBlueHealth = returnFireSimulation.find(returnBlue)->health;
+    returnFireSimulation.update(1.0F);
+    assert(returnFireSimulation.find(returnRed)->recentAttacker == returnBlue);
+    assert(returnFireSimulation.find(returnBlue)->health < returnBlueHealth);
 
     std::cout << "ra2yr core tests passed\n";
     return 0;

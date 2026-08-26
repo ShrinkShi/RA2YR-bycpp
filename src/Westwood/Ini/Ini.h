@@ -16,6 +16,7 @@ public:
     [[nodiscard]] int getInt(std::string_view section, std::string_view key, int fallback = 0) const;
     [[nodiscard]] bool getBool(std::string_view section, std::string_view key, bool fallback = false) const;
     [[nodiscard]] bool hasSection(std::string_view section) const;
+    [[nodiscard]] bool hasKey(std::string_view section, std::string_view key) const;
 
 private:
     using Section = std::unordered_map<std::string, std::string>;

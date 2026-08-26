@@ -109,4 +109,9 @@ bool IniDocument::hasSection(std::string_view section) const {
     return sections_.contains(std::string(section));
 }
 
+bool IniDocument::hasKey(std::string_view section, std::string_view key) const {
+    const auto sectionIt = sections_.find(std::string(section));
+    return sectionIt != sections_.end() && sectionIt->second.contains(std::string(key));
+}
+
 } // namespace ra2yr::westwood

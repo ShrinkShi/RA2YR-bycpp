@@ -76,8 +76,9 @@ enum class Owner : std::uint8_t {
 
 enum class Faction : std::uint8_t {
     Neutral,
-    SovietRules,
-    BlueRules,
+    Soviet,
+    Allied,
+    Yuri,
 };
 
 enum class CommandKind : std::uint8_t {

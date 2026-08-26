@@ -11,7 +11,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -29,8 +31,17 @@ namespace {
 
 constexpr float kLogicalWidth = 1920.0F;
 constexpr float kLogicalHeight = 1080.0F;
-constexpr float kTileWidth = 44.0F;
-constexpr float kTileHeight = 22.0F;
+
+struct RenderScaleConfig {
+    float worldRenderScale;
+    float unitVisualScale;
+    float hudModelScale;
+    float hudPortraitScale;
+};
+
+constexpr RenderScaleConfig kRenderScale{1.0F, 1.65F, 1.10F, 1.20F};
+constexpr float kTileWidth = 44.0F * kRenderScale.worldRenderScale;
+constexpr float kTileHeight = 22.0F * kRenderScale.worldRenderScale;
 
 enum class AppMode {
     MainMenu,
@@ -90,7 +101,34 @@ public:
             shutdown();
             return false;
         }
-        std::cerr << "[Audio] Procedural UI/unit cue stream ready\n";
+        std::cerr << "[Audio] Stream ready; procedural cues remain fallback\n";
+        return true;
+    }
+
+    bool loadVoiceSet(const std::filesystem::path& configPath, std::string& error) {
+        westwood::IniDocument config;
+        if (!config.load(configPath, error)) {
+            return false;
+        }
+        const std::pair<AudioCue, std::string_view> voices[] = {
+            {AudioCue::UnitSelect, "VoiceSelect"},
+            {AudioCue::UnitMove, "VoiceMove"},
+            {AudioCue::UnitAttack, "VoiceAttack"},
+        };
+        for (const auto& [cue, section] : voices) {
+            const std::string file = config.get(section, "File");
+            if (file.empty()) {
+                error = "Missing audio File in [" + std::string(section) + "]";
+                return false;
+            }
+            std::vector<float> samples;
+            const std::filesystem::path audioPath = configPath.parent_path() / file;
+            if (!decodeWav(audioPath, samples, error)) {
+                return false;
+            }
+            voiceSamples_[cue] = std::move(samples);
+            std::cerr << "[Audio] Loaded voice " << section << ": " << audioPath.string() << '\n';
+        }
         return true;
     }
 
@@ -103,6 +141,14 @@ public:
 
     void play(AudioCue cue) {
         if (stream_ == nullptr) {
+            return;
+        }
+        const auto voice = voiceSamples_.find(cue);
+        if (voice != voiceSamples_.end() && !voice->second.empty()) {
+            if (!SDL_PutAudioStreamData(stream_, voice->second.data(),
+                static_cast<int>(voice->second.size() * sizeof(float)))) {
+                std::cerr << "[Audio] Voice queue failed: " << SDL_GetError() << '\n';
+            }
             return;
         }
         const CueSettings settings = settingsFor(cue);
@@ -143,7 +189,73 @@ private:
         return {440.0F, 660.0F, 0.10F, 0.12F};
     }
 
+    static bool decodeWav(const std::filesystem::path& path, std::vector<float>& output, std::string& error) {
+        SDL_AudioSpec spec{};
+        Uint8* data = nullptr;
+        Uint32 length = 0;
+        const std::u8string nativePath = path.u8string();
+        const std::string utf8Path(reinterpret_cast<const char*>(nativePath.data()), nativePath.size());
+        if (!SDL_LoadWAV(utf8Path.c_str(), &spec, &data, &length)) {
+            error = "Unable to load voice WAV " + path.string() + ": " + SDL_GetError();
+            return false;
+        }
+        const std::size_t bytesPerSample = SDL_AUDIO_BYTESIZE(spec.format);
+        const std::size_t channels = static_cast<std::size_t>(std::max(1, spec.channels));
+        const std::size_t frameBytes = bytesPerSample * channels;
+        if (spec.freq <= 0 || frameBytes == 0 || length < frameBytes) {
+            SDL_free(data);
+            error = "Unsupported or empty voice WAV " + path.string();
+            return false;
+        }
+
+        const std::size_t sourceFrames = length / frameBytes;
+        std::vector<float> mono(sourceFrames, 0.0F);
+        const auto* bytes = static_cast<const std::uint8_t*>(data);
+        for (std::size_t frame = 0; frame < sourceFrames; ++frame) {
+            float sum = 0.0F;
+            for (std::size_t channel = 0; channel < channels; ++channel) {
+                const std::size_t offset = frame * frameBytes + channel * bytesPerSample;
+                float sample = 0.0F;
+                if (spec.format == SDL_AUDIO_S16LE || spec.format == SDL_AUDIO_S16) {
+                    const auto value = static_cast<std::int16_t>(
+                        static_cast<std::uint16_t>(bytes[offset]) |
+                        (static_cast<std::uint16_t>(bytes[offset + 1]) << 8));
+                    sample = static_cast<float>(value) / 32768.0F;
+                } else if (spec.format == SDL_AUDIO_F32LE || spec.format == SDL_AUDIO_F32) {
+                    std::memcpy(&sample, bytes + offset, sizeof(float));
+                } else if (spec.format == SDL_AUDIO_U8) {
+                    sample = (static_cast<float>(bytes[offset]) - 128.0F) / 128.0F;
+                } else {
+                    SDL_free(data);
+                    error = "Unsupported voice WAV format in " + path.string();
+                    return false;
+                }
+                sum += sample;
+            }
+            mono[frame] = std::clamp(sum / static_cast<float>(channels), -1.0F, 1.0F);
+        }
+        SDL_free(data);
+
+        const std::size_t targetFrames = std::max<std::size_t>(1, static_cast<std::size_t>(
+            std::llround(static_cast<double>(sourceFrames) * 48000.0 / static_cast<double>(spec.freq))));
+        output.resize(targetFrames);
+        for (std::size_t frame = 0; frame < targetFrames; ++frame) {
+            if (sourceFrames == 1 || targetFrames == 1) {
+                output[frame] = mono.front();
+                continue;
+            }
+            const double sourcePosition = static_cast<double>(frame) * static_cast<double>(sourceFrames - 1) /
+                static_cast<double>(targetFrames - 1);
+            const auto lower = static_cast<std::size_t>(sourcePosition);
+            const auto upper = std::min(sourceFrames - 1, lower + 1);
+            const float blend = static_cast<float>(sourcePosition - static_cast<double>(lower));
+            output[frame] = mono[lower] * (1.0F - blend) + mono[upper] * blend;
+        }
+        return true;
+    }
+
     SDL_AudioStream* stream_ = nullptr;
+    std::unordered_map<AudioCue, std::vector<float>> voiceSamples_;
 };
 
 std::wstring utf8ToWide(const std::string& value) {
@@ -178,6 +290,10 @@ public:
             return false;
         }
         contentRoot_ = executableDirectory();
+        std::string audioError;
+        if (!audio_.loadVoiceSet(contentRoot_ / "assets/audio/voices.ini", audioError)) {
+            std::cerr << "[Audio] Voice set unavailable; using procedural fallback: " << audioError << '\n';
+        }
         loadStrings();
         if (!loadRuntimeAssets(error)) {
             return false;
@@ -185,18 +301,24 @@ public:
         if (!buildTerrain(error)) {
             return false;
         }
-        simulation_ = std::make_unique<simulation::Simulation>(rules_.e2());
+        const gamedata::ArtDefinition* animationDefinition = art_.find(rules_.e2().image);
+        if (animationDefinition == nullptr) {
+            error = "Art.ini has no definition for the E2 image " + rules_.e2().image;
+            return false;
+        }
+        simulation_ = std::make_unique<simulation::Simulation>(*animationDefinition);
         // Keep the sample forces inside the initial camera framing so the
         // first editor run visibly demonstrates both owner colors.
-        simulation_->spawn(Owner::Red, {8, 12});
-        simulation_->spawn(Owner::Red, {12, 10});
-        simulation_->spawn(Owner::Blue, {20, 8});
-        simulation_->spawn(Owner::Blue, {16, 12});
+        simulation_->spawn(rules_.e2(), Owner::Red, {8, 12});
+        simulation_->spawn(rules_.e2(), Owner::Red, {12, 10});
+        simulation_->spawn(rules_.e2(), Owner::Blue, {20, 8});
+        simulation_->spawn(rules_.e2(), Owner::Blue, {16, 12});
         if (stressEntities) {
             for (int index = 0; index < 100; ++index) {
                 const Owner owner = index < 50 ? Owner::Red : Owner::Blue;
                 const int localIndex = index % 50;
-                simulation_->spawn(owner, {16 + (localIndex % 10) * 2, 18 + (localIndex / 10) * 2});
+                simulation_->spawn(rules_.e2(), owner,
+                    {16 + (localIndex % 10) * 2, 18 + (localIndex / 10) * 2});
             }
         }
         return true;
@@ -268,12 +390,9 @@ private:
              {"deploy", L"部署"}, {"hold", L"原地不动"}, {"patrol", L"巡逻"}, {"repair", L"维修"},
              {"waypoint", L"路径点"}, {"attack_move", L"攻击/攻击移动"},
              {"minimap", L"小地图"}, {"unit_model", L"单位模型"}, {"unit_info", L"单位信息"},
-             {"portrait", L"头像 / 动画预览"}, {"producer", L"产能建筑"}, {"producer_1", L"重工 I"},
-             {"producer_2", L"重工 II"}, {"producer_3", L"船厂 I"}, {"tool", L"工具"},
+             {"portrait", L"头像 / 动画预览"}, {"producer", L"产能建筑"}, {"tool", L"工具"},
              {"terrain", L"Terrain"}, {"unit", L"Unit"}, {"object", L"对象"}, {"mode", L"模式"},
              {"select", L"选择"}, {"place", L"放置"}, {"collapse", L"收起"}, {"expand", L"展开"},
-             {"ability_airdrop", L"空降"}, {"ability_nuke", L"核打击"}, {"ability_satellite", L"卫星"},
-             {"ability_genetic", L"基因"}, {"ability_iron_curtain", L"铁幕"},
              {"animation_idle", L"待机"}, {"animation_walk", L"行走"}, {"animation_attack", L"攻击"},
             {"animation_death", L"死亡"},
             {"runtime", L"SIMULATION ONLINE"}, {"asset_missing", L"RUNTIME ASSETS NOT FOUND"},
@@ -313,7 +432,6 @@ private:
             {"ui.hud.button_hover", contentRoot_ / "assets/ui/dta/hud/160pxbtn_c.png"},
             {"ui.hud.tab", contentRoot_ / "assets/ui/dta/hud/133pxtab.png"},
             {"ui.hud.tab_hover", contentRoot_ / "assets/ui/dta/hud/133pxtab_c.png"},
-            {"ui.hud.ability", contentRoot_ / "assets/ui/dta/hud/slocindicator.png"},
         };
         for (const auto& [id, path] : images) {
             if (!renderer_.loadTexture(id, path, error)) {
@@ -509,7 +627,7 @@ private:
             return;
         }
         if (placing_ && inWorld(mouse_)) {
-            simulation_->spawn(placingOwner_, screenToGrid(mouse_));
+            simulation_->spawn(rules_.e2(), placingOwner_, screenToGrid(mouse_));
             placing_ = false;
             return;
         }
@@ -571,8 +689,6 @@ private:
             return true;
         }
         if (mouse_.y >= 216.0F && mouse_.y <= 258.0F && mouse_.x >= 1520.0F && mouse_.x < 1894.0F) {
-            activeProducer_ = std::clamp(static_cast<int>((mouse_.x - 1520.0F) / 126.0F), 0, 2);
-            audio_.play(AudioCue::MenuClick);
             return true;
         }
         if (Rect{1510.0F, 70.0F, 190.0F, 46.0F}.contains(mouse_.x, mouse_.y)) {
@@ -793,19 +909,20 @@ private:
     }
 
     void renderMainMenu() {
-        renderer_.drawImage("ui.main.background", {0.0F, 0.0F, kLogicalWidth, kLogicalHeight});
-        renderer_.drawText(T("title"), {275.0F, 430.0F, 1040.0F, 72.0F}, 48, {1.0F, 0.84F, 0.34F, 1.0F});
-        renderer_.drawText(T("subtitle"), {300.0F, 505.0F, 990.0F, 92.0F}, 68, {1.0F, 0.28F, 0.10F, 1.0F});
-        renderer_.drawText(L"RA2YR-BYCPP  //  MAIN CONTROL", {420.0F, 625.0F, 750.0F, 34.0F}, 20, {0.86F, 0.62F, 0.28F, 1.0F});
+        renderer_.drawRect({0.0F, 0.0F, kLogicalWidth, kLogicalHeight}, {0.0F, 0.0F, 0.0F, 1.0F});
+        renderer_.drawImage("ui.main.background", {320.0F, 120.0F, 1280.0F, 824.0F});
+        renderer_.drawText(T("title"), {510.0F, 425.0F, 640.0F, 58.0F}, 36, {1.0F, 0.84F, 0.34F, 1.0F});
+        renderer_.drawText(T("subtitle"), {500.0F, 482.0F, 660.0F, 72.0F}, 50, {1.0F, 0.28F, 0.10F, 1.0F});
+        renderer_.drawText(L"RA2YR-BYCPP  //  MAIN CONTROL", {520.0F, 560.0F, 620.0F, 30.0F}, 16, {0.86F, 0.62F, 0.28F, 1.0F});
         for (std::size_t i = 0; i < menuButtons_.size(); ++i) {
             const MenuButton& button = menuButtons_[i];
             const bool hovered = button.rect.contains(mouse_.x, mouse_.y);
             const bool pressed = pressedMenuButton_ == static_cast<int>(i);
             renderer_.drawImage(pressed || hovered ? button.hoverImage : button.image, button.rect,
                 pressed ? Color{0.80F, 0.80F, 0.80F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
-            renderer_.drawText(T(button.key), button.rect, 24, {1.0F, 0.86F, 0.20F, 1.0F});
+            renderer_.drawText(T(button.key), button.rect, 18, {1.0F, 0.86F, 0.20F, 1.0F});
         }
-        renderer_.drawText(L"RED COMMAND CONSOLE  //  C++23 / SDL3 / D3D11", {94.0F, 1008.0F, 980.0F, 28.0F}, 16, {0.72F, 0.34F, 0.18F, 1.0F}, false);
+        renderer_.drawText(L"RED COMMAND CONSOLE  //  C++23 / SDL3 / D3D11", {350.0F, 1008.0F, 1220.0F, 28.0F}, 14, {0.72F, 0.34F, 0.18F, 1.0F}, false);
     }
 
     void drawHudPanel(Rect panel, const std::wstring& title) {
@@ -854,7 +971,7 @@ private:
             if (assetReady_) {
                 renderer_.drawSprite(rules_.e2().image, "unittem", static_cast<std::size_t>(art_.frameIndex(
                     rules_.e2().image, animationSequence(entity.animationState), entity.animationFrame,
-                    entity.facing)), entity.owner, position, 0.72F);
+                    entity.facing)), entity.owner, position, kRenderScale.unitVisualScale);
             }
             if (entity.selected) {
                 renderer_.drawBorder({position.x - 22.0F, position.y - 8.0F, 44.0F, 16.0F},
@@ -881,14 +998,11 @@ private:
         if (!strategicCollapsed_) {
             renderer_.drawText(T("strategic"), {12.0F, 164.0F, 70.0F, 34.0F}, 14,
                 {1.0F, 0.82F, 0.20F, 1.0F});
-            const std::string abilityKeys[] = {"ability_airdrop", "ability_nuke", "ability_satellite",
-                "ability_genetic", "ability_iron_curtain"};
             for (int index = 0; index < 5; ++index) {
                 const Rect ability{18.0F, 202.0F + index * 108.0F, 58.0F, 92.0F};
                 renderer_.drawImage("ui.hud.button", ability);
-                renderer_.drawImage("ui.hud.ability", {ability.x + 4.0F, ability.y + 4.0F, 50.0F, 50.0F});
-                renderer_.drawText(T(abilityKeys[index]), {ability.x + 2.0F, ability.y + 57.0F,
-                    ability.width - 4.0F, 30.0F}, 10, {0.92F, 0.80F, 0.36F, 1.0F});
+                renderer_.drawText(L"--", {ability.x + 2.0F, ability.y + 23.0F,
+                    ability.width - 4.0F, 34.0F}, 22, {0.42F, 0.44F, 0.48F, 1.0F});
             }
         }
 
@@ -910,11 +1024,10 @@ private:
         }
         renderer_.drawText(T("producer"), {1520.0F, 191.0F, 370.0F, 26.0F}, 16,
             {0.86F, 0.68F, 0.22F, 1.0F});
-        const std::string producerKeys[] = {"producer_1", "producer_2", "producer_3"};
         for (int index = 0; index < 3; ++index) {
             const Rect producer{1520.0F + index * 126.0F, 216.0F, 118.0F, 42.0F};
-            renderer_.drawImage(index == activeProducer_ ? "ui.hud.tab_hover" : "ui.hud.tab", producer);
-            renderer_.drawText(T(producerKeys[index]), producer, 15, {1.0F, 0.82F, 0.20F, 1.0F});
+            renderer_.drawImage("ui.hud.tab", producer, {0.55F, 0.55F, 0.58F, 1.0F});
+            renderer_.drawText(L"--", producer, 18, {0.42F, 0.44F, 0.48F, 1.0F});
         }
         for (int index = 0; index < 12; ++index) {
             const int column = index % 3;
@@ -944,8 +1057,10 @@ private:
         if (preview != nullptr && assetReady_) {
             const std::size_t frame = static_cast<std::size_t>(art_.frameIndex(rules_.e2().image,
                 animationSequence(preview->animationState), preview->animationFrame, preview->facing));
-            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner, {436.0F, 1005.0F}, 0.82F);
-            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner, {1275.0F, 1005.0F}, 0.90F);
+            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner, {436.0F, 1005.0F},
+                kRenderScale.hudModelScale);
+            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner, {1275.0F, 1005.0F},
+                kRenderScale.hudPortraitScale);
             renderer_.drawText(animationLabel(preview->animationState) + L"  /  DIR " +
                 std::to_wstring(preview->facing), {1300.0F, 918.0F, 170.0F, 30.0F}, 15,
                 {1.0F, 0.82F, 0.20F, 1.0F}, false);
@@ -1048,7 +1163,6 @@ private:
     bool dragging_ = false;
     bool strategicCollapsed_ = false;
     int activeTab_ = 0;
-    int activeProducer_ = 0;
     int pressedMenuButton_ = -1;
     int hoveredMenuButton_ = -1;
     float toastTime_ = 0.0F;
@@ -1058,15 +1172,15 @@ private:
     IsoProjection projection_{kTileWidth, kTileHeight, {790.0F, 440.0F}};
     std::size_t terrainTileCount_ = 0;
     std::vector<MenuButton> menuButtons_ = {
-        {"campaign", "ui.main.button", "ui.main.button_hover", {1530.0F, 260.0F, 330.0F, 78.0F}},
-        {"load", "ui.main.button", "ui.main.button_hover", {1530.0F, 346.0F, 330.0F, 78.0F}},
-        {"skirmish", "ui.main.button", "ui.main.button_hover", {1530.0F, 432.0F, 330.0F, 78.0F}},
-        {"online", "ui.main.button", "ui.main.button_hover", {1530.0F, 518.0F, 330.0F, 78.0F}},
-        {"lan", "ui.main.button", "ui.main.button_hover", {1530.0F, 604.0F, 330.0F, 78.0F}},
-        {"settings", "ui.main.button", "ui.main.button_hover", {1530.0F, 690.0F, 330.0F, 78.0F}},
-        {"statistics", "ui.main.button", "ui.main.button_hover", {1530.0F, 776.0F, 330.0F, 78.0F}},
-        {"editor", "ui.main.button", "ui.main.button_hover", {1530.0F, 862.0F, 330.0F, 78.0F}},
-        {"exit", "ui.main.button", "ui.main.button_hover", {1530.0F, 948.0F, 330.0F, 78.0F}},
+        {"campaign", "ui.main.button", "ui.main.button_hover", {1322.0F, 315.0F, 176.0F, 49.0F}},
+        {"load", "ui.main.button", "ui.main.button_hover", {1322.0F, 376.0F, 176.0F, 49.0F}},
+        {"skirmish", "ui.main.button", "ui.main.button_hover", {1322.0F, 437.0F, 176.0F, 49.0F}},
+        {"online", "ui.main.button", "ui.main.button_hover", {1322.0F, 498.0F, 176.0F, 49.0F}},
+        {"lan", "ui.main.button", "ui.main.button_hover", {1322.0F, 559.0F, 176.0F, 49.0F}},
+        {"settings", "ui.main.button", "ui.main.button_hover", {1322.0F, 620.0F, 176.0F, 49.0F}},
+        {"statistics", "ui.main.button", "ui.main.button_hover", {1322.0F, 681.0F, 176.0F, 49.0F}},
+        {"editor", "ui.main.button", "ui.main.button_hover", {1322.0F, 742.0F, 176.0F, 49.0F}},
+        {"exit", "ui.main.button", "ui.main.button_hover", {1322.0F, 803.0F, 176.0F, 49.0F}},
     };
 };
 

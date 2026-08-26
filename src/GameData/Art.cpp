@@ -1,5 +1,6 @@
 #include "GameData/Art.h"
 
+#include <algorithm>
 #include <charconv>
 #include <sstream>
 #include <utility>
@@ -31,8 +32,8 @@ bool parseSequence(std::string_view value, AnimationSequence& sequence) {
         fields[fieldCount++] = trim(token);
     }
     if (fieldCount < 3 || !parseInt(fields[0], sequence.firstFrame) ||
-        !parseInt(fields[1], sequence.frameCount) || !parseInt(fields[2], sequence.rate) ||
-        sequence.firstFrame < 0 || sequence.frameCount <= 0 || sequence.rate < 0) {
+        !parseInt(fields[1], sequence.frameCount) || !parseInt(fields[2], sequence.facingStride) ||
+        sequence.firstFrame < 0 || sequence.frameCount <= 0 || sequence.facingStride < 0) {
         return false;
     }
     return true;
@@ -71,6 +72,19 @@ bool ArtDatabase::load(const std::filesystem::path& artPath, std::string& error)
             error = "Invalid animation sequence " + cons.sequence + "." + key;
             return false;
         }
+        const std::string delayKey = key + "FrameDelayMs";
+        const std::string loopKey = key + "Loop";
+        if (!art.hasKey(cons.sequence, delayKey) || !art.hasKey(cons.sequence, loopKey)) {
+            error = "Animation sequence " + cons.sequence + "." + key +
+                " must define " + delayKey + " and " + loopKey;
+            return false;
+        }
+        sequence.frameDelayMs = art.getInt(cons.sequence, delayKey, 0);
+        if (sequence.frameDelayMs <= 0) {
+            error = "Animation sequence " + cons.sequence + "." + delayKey + " must be positive";
+            return false;
+        }
+        sequence.loop = art.getBool(cons.sequence, loopKey, false);
         cons.sequences.emplace(key, sequence);
     }
     for (const std::string& required : {"Ready", "Walk", "Fire", "Death"}) {
@@ -101,12 +115,20 @@ int ArtDatabase::frameIndex(std::string_view image, std::string_view sequence, i
         return 0;
     }
     const AnimationSequence& value = it->second;
-    const int frame = animationIndex < 0 ? 0 : animationIndex % value.frameCount;
-    int facing = facingIndex % definition->facingCount;
-    if (facing < 0) {
-        facing += definition->facingCount;
+    int frame = std::max(0, animationIndex);
+    if (value.loop) {
+        frame %= value.frameCount;
+    } else {
+        frame = std::min(frame, value.frameCount - 1);
     }
-    return value.firstFrame + facing * value.frameCount + frame;
+    int facing = 0;
+    if (value.facingStride > 0) {
+        facing = facingIndex % definition->facingCount;
+        if (facing < 0) {
+            facing += definition->facingCount;
+        }
+    }
+    return value.firstFrame + facing * value.facingStride + frame;
 }
 
 int ArtDatabase::sequenceFrameCount(std::string_view image, std::string_view sequence) const {
@@ -116,6 +138,33 @@ int ArtDatabase::sequenceFrameCount(std::string_view image, std::string_view seq
     }
     const auto it = definition->sequences.find(std::string(sequence));
     return it == definition->sequences.end() ? 1 : it->second.frameCount;
+}
+
+int ArtDatabase::sequenceFrameDelayMs(std::string_view image, std::string_view sequence) const {
+    const ArtDefinition* definition = find(image);
+    if (definition == nullptr) {
+        return 80;
+    }
+    const auto it = definition->sequences.find(std::string(sequence));
+    return it == definition->sequences.end() ? 80 : it->second.frameDelayMs;
+}
+
+bool ArtDatabase::sequenceLoops(std::string_view image, std::string_view sequence) const {
+    const ArtDefinition* definition = find(image);
+    if (definition == nullptr) {
+        return true;
+    }
+    const auto it = definition->sequences.find(std::string(sequence));
+    return it == definition->sequences.end() ? true : it->second.loop;
+}
+
+bool ArtDatabase::sequenceIsDirectional(std::string_view image, std::string_view sequence) const {
+    const ArtDefinition* definition = find(image);
+    if (definition == nullptr) {
+        return false;
+    }
+    const auto it = definition->sequences.find(std::string(sequence));
+    return it != definition->sequences.end() && it->second.facingStride > 0;
 }
 
 int ArtDatabase::facingCount(std::string_view image) const {

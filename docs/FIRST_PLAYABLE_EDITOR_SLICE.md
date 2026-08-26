@@ -22,6 +22,10 @@ The lower-right command card is deliberately 3 rows by 5 columns. It is not a sc
 
 Simulation and content readers do not include renderer headers.
 
+## Infantry animation data
+
+For a Westwood infantry sequence `first,count,facingStride`, the third value is the frame stride between facing-specific starts. A zero stride means that the sequence is not directional, so `Death=134,15,0` always selects frames 134 through 148 regardless of facing. Runtime frame delay and looping are explicit `Art.ini` metadata and are not encoded in the sequence triple.
+
 ## Build
 
 Prerequisites: Windows 10/11 x64, Visual Studio C++ workload or clang-cl, CMake 3.28+, Ninja, vcpkg and SDL3.
@@ -53,8 +57,9 @@ The runtime reads its own `INI/Rules.ini`, `INI/Art.ini`, `assets/game/ra2/infan
 - Red/Blue owner placement and real SHP frame decoding/remap from project-owned assets.
 - Single selection, drag selection, empty-click deselect, right-click commands and keyboard commands.
 - 3x5 command card with only Move, Stop, Hold, Patrol and Attack Move in the first row; the second and third rows are reserved.
-- Left strategic ability rail and right two-tier production sidebar shell.
+- Left collapsible strategic ability rail with empty slots and right two-tier production sidebar shell with disabled empty producer selectors.
+- Data-driven E2 voice samples for Select, Move and Attack, with procedural cues retained only as fallback/debug audio.
 
 ## Not implemented in this slice
 
-Real MAP/TMP loading, FA2 import/export, production queues, economy, multiplayer, AI, triggers, full fog of war, VXL, buildings, audio and save/load remain outside this milestone. Procedural grass is explicitly Development Sandbox content and is not Classic TMP compatibility.
+Real MAP/TMP loading, FA2 import/export, production queues, economy, multiplayer, AI, triggers, full fog of war, VXL, buildings and save/load remain outside this milestone. Procedural grass is explicitly Development Sandbox content and is not Classic TMP compatibility.

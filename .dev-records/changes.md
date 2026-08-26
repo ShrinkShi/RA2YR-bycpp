@@ -40,3 +40,22 @@
 - MSVC x64 C++ 编译、链接成功；CTest 1/1 通过。
 - 实际 EXE 启动并加载项目 Rules/Art/CONS/palette；重新捕获主菜单、Editor HUD 与 F3 状态截图。
 - 最终人工视觉/交互验收仍由用户完成。
+
+## 2026-08-26 - PR #1 remaining findings closure
+
+### 变更范围
+- 不新增玩法；只修正动画配置运行时、Definition 数据边界、自动攻击行为、空侧栏状态、语音和显示比例。
+
+### 具体改动
+- `AnimationSequence` 使用 `facingStride`、`frameDelayMs`、`loop`；`Death=134,15,0` 对所有方向选择同一段非方向帧。
+- `Simulation::spawn` 接收 `UnitDefinition`，Entity 独立保存 Definition ID、Faction、多个 UnitTag、AutoAcquire、ReturnFire 和最近攻击者。
+- Idle/Stop/Hold 只在射程内自动开火，不追击；AttackMove 继续沿路索敌和追击；受击后 ReturnFire 接入 Simulation。
+- Strategic Ability Bar 和 Producer Selector 在无 Provider/Entity 时显示 disabled 空槽，不伪造能力名或建筑名。
+- 新增 `assets/audio/voices.ini` 与三个由 Windows SAPI 生成的短 WAV 样例，AudioService 以数据表选择语音，程序化 cue 仅作 fallback/debug。
+- 调整 RA2/YR 主菜单控制台和按钮布局，命名 `RenderScaleConfig` 集中世界/单位/UI 比例。
+- 更新 corpus Superseded 说明与第三方素材清单。
+
+### 验证情况
+- CMake configure PASS；MSVC x64 compile/link PASS；CTest 1/1 PASS。
+- 实际启动窗口保持响应；主菜单、Editor HUD、F3 性能层截图已重新捕获。
+- 最终人工交互验收仍由用户完成；截图不等同于人工验收通过。

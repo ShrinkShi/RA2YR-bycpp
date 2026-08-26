@@ -2,15 +2,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace ra2yr::simulation {
 namespace {
 
-constexpr int kFacingCount = 8;
-constexpr int kWalkFrameCount = 6;
-constexpr int kAttackFrameCount = 6;
-constexpr int kDeathFrameCount = 15;
-constexpr float kAnimationFrameSeconds = 0.08F;
 constexpr float kPi = 3.14159265358979323846F;
 
 WorldCoord toWorld(GridCoord coord) {
@@ -25,35 +21,43 @@ bool hostile(Owner first, Owner second) {
     return first != Owner::Neutral && second != Owner::Neutral && first != second;
 }
 
-int facingFromDelta(float dx, float dy, int fallback) {
+int facingFromDelta(float dx, float dy, int fallback, int facingCount) {
     if (std::abs(dx) < 0.001F && std::abs(dy) < 0.001F) {
         return fallback;
     }
-    int facing = static_cast<int>(std::lround(std::atan2(dy, dx) / (kPi / 4.0F)));
-    facing %= kFacingCount;
+    const int safeFacingCount = std::max(1, facingCount);
+    int facing = static_cast<int>(std::lround(
+        std::atan2(dy, dx) / (2.0F * kPi / static_cast<float>(safeFacingCount))));
+    facing %= safeFacingCount;
     if (facing < 0) {
-        facing += kFacingCount;
+        facing += safeFacingCount;
     }
     return facing;
 }
 
 } // namespace
 
-Simulation::Simulation(const gamedata::UnitDefinition& definition) : definition_(definition) {}
+Simulation::Simulation(const gamedata::ArtDefinition& animationDefinition)
+    : animationDefinition_(animationDefinition) {}
 
-std::uint32_t Simulation::spawn(Owner owner, GridCoord position) {
+std::uint32_t Simulation::spawn(const gamedata::UnitDefinition& definition, Owner owner, GridCoord position) {
     Entity entity;
     entity.id = nextId_++;
+    entity.definitionId = definition.id;
+    entity.unitTags = definition.unitTags;
     entity.owner = owner;
-    entity.faction = owner == Owner::Red ? Faction::SovietRules : owner == Owner::Blue ? Faction::BlueRules : Faction::Neutral;
+    entity.faction = definition.faction;
     entity.position = toWorld(position);
-    entity.health = definition_.strength;
-    entity.maxHealth = definition_.strength;
-    entity.speed = std::max(1, definition_.speed);
-    entity.weaponRange = definition_.primary.range;
-    entity.weaponDamage = std::max(1, definition_.primary.damage);
-    entities_.push_back(entity);
-    return entity.id;
+    entity.health = definition.strength;
+    entity.maxHealth = definition.strength;
+    entity.speed = std::max(1, definition.speed);
+    entity.sight = std::max(1, definition.sight);
+    entity.weaponRange = std::max(0.1F, definition.primary.range);
+    entity.weaponDamage = std::max(1, definition.primary.damage);
+    entity.autoAcquire = definition.autoAcquire;
+    entity.returnFire = definition.returnFire;
+    entities_.push_back(std::move(entity));
+    return entities_.back().id;
 }
 
 void Simulation::update(float seconds) {
@@ -66,16 +70,12 @@ void Simulation::update(float seconds) {
             updateAnimation(entity, elapsed);
         }
     }
-    for (Entity& entity : entities_) {
-        if (entity.health <= 0) {
-            entity.selected = false;
-            entity.order = {};
-            setAnimation(entity, AnimationState::Death);
-        }
-    }
-    entities_.erase(std::remove_if(entities_.begin(), entities_.end(), [](const Entity& entity) {
+
+    const auto* deathSequence = animationSequence(AnimationState::Death);
+    const int lastDeathFrame = deathSequence == nullptr ? 0 : deathSequence->frameCount - 1;
+    entities_.erase(std::remove_if(entities_.begin(), entities_.end(), [lastDeathFrame](const Entity& entity) {
         return entity.health <= 0 && entity.animationState == AnimationState::Death &&
-            entity.animationFrame >= kDeathFrameCount - 1;
+            entity.animationFrame >= lastDeathFrame;
     }), entities_.end());
 }
 
@@ -84,55 +84,87 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
         entity.weaponCooldown = std::max(0.0F, entity.weaponCooldown - seconds);
     }
 
-    const WorldCoord destination = toWorld(entity.order.destination);
-    const bool hasDestination = entity.order.kind == CommandKind::Move ||
-        entity.order.kind == CommandKind::Patrol || entity.order.kind == CommandKind::AttackMove;
-    bool moving = false;
-    if (hasDestination && distance(entity.position, destination) > 0.12F) {
-        const float dx = destination.x - entity.position.x;
-        const float dy = destination.y - entity.position.y;
-        const float length = std::sqrt(dx * dx + dy * dy);
-        const float step = static_cast<float>(entity.speed) * seconds * 0.55F;
-        entity.facing = facingFromDelta(dx, dy, entity.facing);
-        entity.position.x += dx / length * std::min(step, length);
-        entity.position.y += dy / length * std::min(step, length);
-        moving = true;
-    } else if (entity.order.kind == CommandKind::Patrol && entity.patrolPoint.has_value()) {
-        std::swap(entity.order.destination, *entity.patrolPoint);
-    }
-
-    Entity* target = entity.order.kind == CommandKind::Attack ? find(entity.order.target) : nullptr;
-    if (entity.order.kind == CommandKind::AttackMove && target == nullptr) {
+    const CommandKind orderKind = entity.order.kind;
+    Entity* target = nullptr;
+    bool mayChaseTarget = false;
+    if (orderKind == CommandKind::Attack) {
+        target = find(entity.order.target);
+        mayChaseTarget = true;
+    } else if (orderKind == CommandKind::AttackMove) {
         target = nearestEnemy(entity, entity.weaponRange + 3.0F);
-        if (target != nullptr) {
-            entity.order.kind = CommandKind::Attack;
-            entity.order.target = target->id;
+        mayChaseTarget = true;
+    } else {
+        if (entity.returnFire && entity.recentAttacker != 0) {
+            Entity* attacker = find(entity.recentAttacker);
+            if (attacker != nullptr && isAlive(*attacker) && hostile(entity.owner, attacker->owner) &&
+                distance(entity.position, attacker->position) <= entity.weaponRange) {
+                target = attacker;
+            }
+        }
+        const bool canAutoAcquire = orderKind == CommandKind::None || orderKind == CommandKind::Stop ||
+            orderKind == CommandKind::Hold;
+        if (target == nullptr && entity.autoAcquire && canAutoAcquire) {
+            // Guarding and weapon range are intentionally bounded by the weapon itself in this slice.
+            target = nearestEnemy(entity, std::min(entity.weaponRange, static_cast<float>(entity.sight)));
         }
     }
+
+    bool moving = false;
+    bool attacking = false;
     if (target != nullptr && isAlive(*target)) {
         const float targetDistance = distance(entity.position, target->position);
         if (targetDistance > entity.weaponRange) {
-            const float dx = target->position.x - entity.position.x;
-            const float dy = target->position.y - entity.position.y;
-            const float length = std::sqrt(dx * dx + dy * dy);
-            const float step = static_cast<float>(entity.speed) * seconds * 0.55F;
-            entity.facing = facingFromDelta(dx, dy, entity.facing);
-            entity.position.x += dx / length * std::min(step, length);
-            entity.position.y += dy / length * std::min(step, length);
-            moving = true;
-        } else if (entity.weaponCooldown <= 0.0F) {
+            if (mayChaseTarget) {
+                const float dx = target->position.x - entity.position.x;
+                const float dy = target->position.y - entity.position.y;
+                const float length = std::sqrt(dx * dx + dy * dy);
+                if (length > 0.001F) {
+                    const float step = static_cast<float>(entity.speed) * seconds * 0.55F;
+                    entity.facing = facingFromDelta(dx, dy, entity.facing, animationDefinition_.facingCount);
+                    entity.position.x += dx / length * std::min(step, length);
+                    entity.position.y += dy / length * std::min(step, length);
+                    moving = true;
+                }
+            }
+        } else {
+            attacking = true;
             entity.facing = facingFromDelta(target->position.x - entity.position.x,
-                target->position.y - entity.position.y, entity.facing);
-            target->health -= entity.weaponDamage;
-            entity.weaponCooldown = 25.0F / 30.0F;
-            ++entity.attackEvent;
-            if (target->health <= 0) {
-                target->health = 0;
-                target->order = {};
+                target->position.y - entity.position.y, entity.facing, animationDefinition_.facingCount);
+            if (entity.weaponCooldown <= 0.0F) {
+                target->health = std::max(0, target->health - entity.weaponDamage);
+                target->recentAttacker = entity.id;
+                entity.weaponCooldown = 25.0F / 30.0F;
+                ++entity.attackEvent;
+                if (!isAlive(*target)) {
+                    target->order = {};
+                    target->patrolPoint.reset();
+                    target->selected = false;
+                }
             }
         }
     }
-    if (target != nullptr && isAlive(*target) && distance(entity.position, target->position) <= entity.weaponRange) {
+
+    const WorldCoord destination = toWorld(entity.order.destination);
+    const bool hasDestination = orderKind == CommandKind::Move || orderKind == CommandKind::Patrol ||
+        orderKind == CommandKind::AttackMove;
+    if (!attacking && !moving && (target == nullptr || !isAlive(*target)) && hasDestination &&
+        distance(entity.position, destination) > 0.12F) {
+        const float dx = destination.x - entity.position.x;
+        const float dy = destination.y - entity.position.y;
+        const float length = std::sqrt(dx * dx + dy * dy);
+        if (length > 0.001F) {
+            const float step = static_cast<float>(entity.speed) * seconds * 0.55F;
+            entity.facing = facingFromDelta(dx, dy, entity.facing, animationDefinition_.facingCount);
+            entity.position.x += dx / length * std::min(step, length);
+            entity.position.y += dy / length * std::min(step, length);
+            moving = true;
+        }
+    } else if (!attacking && !moving && orderKind == CommandKind::Patrol && entity.patrolPoint.has_value() &&
+        distance(entity.position, destination) <= 0.12F) {
+        std::swap(entity.order.destination, *entity.patrolPoint);
+    }
+
+    if (attacking) {
         setAnimation(entity, AnimationState::Attack);
     } else if (moving) {
         setAnimation(entity, AnimationState::Walk);
@@ -152,20 +184,26 @@ void Simulation::setAnimation(Entity& entity, AnimationState state) {
 }
 
 void Simulation::updateAnimation(Entity& entity, float seconds) {
-    if (entity.animationState == AnimationState::Death && entity.animationFrame >= kDeathFrameCount - 1) {
+    const gamedata::AnimationSequence* sequence = animationSequence(entity.animationState);
+    if (sequence == nullptr || sequence->frameCount <= 0) {
         return;
     }
+    if (!sequence->loop && entity.animationFrame >= sequence->frameCount - 1) {
+        return;
+    }
+
     entity.animationTime += seconds;
-    const int frameCount = entity.animationState == AnimationState::Death ? kDeathFrameCount :
-        entity.animationState == AnimationState::Idle ? 1 :
-        entity.animationState == AnimationState::Walk ? kWalkFrameCount : kAttackFrameCount;
-    while (entity.animationTime >= kAnimationFrameSeconds) {
-        entity.animationTime -= kAnimationFrameSeconds;
+    const float frameSeconds = static_cast<float>(sequence->frameDelayMs) / 1000.0F;
+    while (entity.animationTime >= frameSeconds) {
+        entity.animationTime -= frameSeconds;
         ++entity.animationFrame;
-        if (entity.animationState == AnimationState::Death) {
-            entity.animationFrame = std::min(entity.animationFrame, frameCount - 1);
+        if (sequence->loop) {
+            entity.animationFrame %= sequence->frameCount;
         } else {
-            entity.animationFrame %= frameCount;
+            entity.animationFrame = std::min(entity.animationFrame, sequence->frameCount - 1);
+        }
+        if (!sequence->loop && entity.animationFrame >= sequence->frameCount - 1) {
+            break;
         }
     }
 }
@@ -224,11 +262,6 @@ void Simulation::issueMove(GridCoord destination) {
 
 void Simulation::issueStop() {
     applyToSelected({CommandKind::Stop, {}, 0});
-    for (Entity& entity : entities_) {
-        if (entity.selected) {
-            entity.order = {};
-        }
-    }
 }
 
 void Simulation::issueHold() {
@@ -280,6 +313,25 @@ Entity* Simulation::nearestEnemy(const Entity& source, float maxDistance) {
         }
     }
     return result;
+}
+
+const gamedata::AnimationSequence* Simulation::animationSequence(AnimationState state) const {
+    const auto it = animationDefinition_.sequences.find(animationSequenceName(state));
+    return it == animationDefinition_.sequences.end() ? nullptr : &it->second;
+}
+
+const char* Simulation::animationSequenceName(AnimationState state) {
+    switch (state) {
+    case AnimationState::Idle:
+        return "Ready";
+    case AnimationState::Walk:
+        return "Walk";
+    case AnimationState::Attack:
+        return "Fire";
+    case AnimationState::Death:
+        return "Death";
+    }
+    return "Ready";
 }
 
 } // namespace ra2yr::simulation

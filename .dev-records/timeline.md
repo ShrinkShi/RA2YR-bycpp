@@ -81,3 +81,16 @@
 - `test.ps1` 通过 CTest：1/1。
 - 实际启动窗口，日志确认 `Rules.ini`、`Art.ini`、`CONS.SHP`、`unittem.pal` 加载成功；F3 截图确认 Ready、Walk、Fire 状态证据。
 - 截图仅作为人工验收证据，不将静态/自动化验证描述为人工视觉验收通过。
+
+## 2026-08-26 - PR #1 remaining findings closure
+
+### 本轮处理
+- 复核远端 feature exact HEAD 后继续在同一分支工作，未触碰 main 或 `agent/ra2yr-corpus-lfs` worktree。
+- 修正 Westwood infantry sequence 三元组语义：第三字段为 `facingStride`；显式加载每个序列的 `FrameDelayMs`/`Loop`，Death stride=0 不使用 facing。
+- 将 Faction/UnitTag/AutoAcquire/ReturnFire 写入每个 Definition/Entity；同 Owner 的不同 Faction 单位可并存；Simulation 实现 Idle/Stop/Hold 自动攻击/还击与 AttackMove 追击。
+- 战略能力和 Producer Selector 保留框架但清空未实现名称；加入真实 WAV 语音样例和 `voices.ini` 数据映射。
+- 菜单收紧居中、单位世界缩放集中配置，并将 corpus 依赖说明标为 Development Sandbox 的 Superseded/optional。
+
+### 真实验证
+- CMake configure、MSVC build、CTest 均成功；实际 EXE 保持响应并捕获主菜单、Editor 和 F3 画面。
+- 运行期日志确认 Select/Move/Attack 三条 WAV voice、Rules.ini、Art.ini、CONS.SHP 和 unittem.pal 已加载。
