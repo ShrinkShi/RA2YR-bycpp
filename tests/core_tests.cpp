@@ -111,9 +111,26 @@ Inviso=yes
     assert(ui.rect("hud.unitstatus").width > 600.0F);
     assert(ui.childRect("hud.unitstatus", "hud.unitstatus.preview").width > 0.0F);
     assert(ui.relativeRect("hud.unitstatus.card.badge").width > 0.0F);
-    const Rect commandSlot = ui.childRect("hud.command_card", "hud.command_card.slot.0");
-    assert(commandSlot.x == ui.rect("hud.command_card").x + 5.0F);
-    assert(commandSlot.y == ui.rect("hud.command_card").y + 28.0F);
+    const Rect commandPanel = ui.rect("hud.command_card");
+    const Rect minimapPanel = ui.rect("hud.minimap");
+    const Rect minimapUiField = ui.childRect("hud.minimap", "minimap.field");
+    const Rect portraitPanel = ui.rect("hud.portrait");
+    const Rect portraitViewport = ui.rect("hud.portrait.viewport");
+    assert(commandPanel.height > ui.rect("hud.unitstatus").height);
+    assert(commandPanel.height == minimapPanel.height);
+    assert(minimapUiField.width == minimapUiField.height);
+    assert(std::abs(portraitPanel.width / portraitPanel.height - (2.0F / 3.0F)) < 0.001F);
+    assert(std::abs(portraitViewport.width / portraitViewport.height - (2.0F / 3.0F)) < 0.001F);
+    assert(ui.setting("HUD.UnitStatus", "CardWidth", 0.0F) ==
+        ui.setting("HUD.UnitStatus", "CardHeight", 0.0F));
+    for (int slot = 0; slot < 15; ++slot) {
+        const Rect commandSlot = ui.childRect("hud.command_card",
+            "hud.command_card.slot." + std::to_string(slot));
+        assert(commandSlot.width == commandSlot.height);
+        assert(commandSlot.x >= commandPanel.x && commandSlot.y >= commandPanel.y);
+        assert(commandSlot.x + commandSlot.width <= commandPanel.x + commandPanel.width);
+        assert(commandSlot.y + commandSlot.height <= commandPanel.y + commandPanel.height);
+    }
     const Rect assetIcon = ui.relativeRect("sandbox.asset.icon.0");
     const Rect assetLabel = ui.relativeRect("sandbox.asset.label.0");
     assert(assetIcon.width > 0.0F && assetIcon.height > 0.0F);

@@ -197,3 +197,33 @@
 - 修复 Move/AttackMove 抵达后仍使用原始点击格的回退路径；6/9 infantry 回归测试在抵达后继续模拟 5 秒，验证 occupancy/subcell/position/order 稳定。
 - Sandbox 改用紧凑 RA2/Soviet 控件皮肤、tab 和真实资产卡；Unit Status 使用统一 `hud.unitstatus` 外框；Minimap 改为共享等距菱形投影和四角相机视口多边形。
 - preset configure、自动发现 VS Developer 环境下的 MSVC build/link、CTest 和实际 EXE 启动均完成；截图只作为运行证据，不代替用户人工验收。
+
+## 2026-08-27 - 编辑器视觉收口与运行复核
+
+### 用户目标
+- 让测试地块清楚呈现单格边界；修正高密度 Infantry 的可读性；按参考图收紧异形 HUD、2:3 头像区、固定方形 3x5 Command Card、左收战略栏、SHP 生产图标、两列空产能栏，并去除 Sandbox 英文。
+- 继续使用 PR #2 的 `feature/editor-tools-and-unit-info`，不新增 Gameplay 范围，不混入独立 corpus 或用户资料。
+
+### 本轮处理
+- 更新 `INI/UI.ini` 与客户端渲染布局，使用高对比水泥等距格和黑色世界边线；扩大 Command Card/Minimap，高度与 3x5 方格由配置驱动。
+- 增加 RA2/YR 生产分类 SHP 图标加载和两列禁用产品槽；战略栏折叠命中框随状态切换，并将 Sandbox 可见文本和窗口标题本地化为中文。
+- 增加/更新回归断言，覆盖 HUD 高度、方形 minimap field、2:3 portrait、15 个方形 Command Card slot；运行压力场景采集截图。
+
+### 关键结论
+- UI rect、绘制和命中测试仍保持同一份 `UI.ini` 数据来源；本轮只添加视觉与布局收口，不引入生产实体或新单位。
+- 本地截图和参考资料保留在工作区，生产 SHP 与来源说明才进入本轮提交。
+
+### 影响文件
+- `INI/Terrain.ini`
+- `INI/UI.ini`
+- `assets/ui/strings.ini`
+- `assets/game/ra2/production/*.shp`
+- `src/Client/main.cpp`
+- `src/Renderer/D3D11Renderer.cpp`
+- `src/Simulation/Simulation.cpp`
+- `tests/core_tests.cpp`
+- `docs/FIRST_PLAYABLE_EDITOR_SLICE.md`
+- `docs/THIRD_PARTY_ASSETS.md`
+
+### 后续事项
+- 等待用户对本轮运行截图进行最终视觉/交互验收；不把自动化运行证据表述为人工验收通过。

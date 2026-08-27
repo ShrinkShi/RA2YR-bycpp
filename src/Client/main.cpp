@@ -48,11 +48,23 @@ struct RenderScaleConfig {
 
 // Keep the world grid readable enough for the three infantry subcells. UI
 // coordinates remain on the independent 1920x1080 logical canvas.
-constexpr RenderScaleConfig kRenderScale{1.75F, 1.35F, 1.10F, 1.20F};
-constexpr float kTileWidth = 44.0F * kRenderScale.worldRenderScale;
-constexpr float kTileHeight = 22.0F * kRenderScale.worldRenderScale;
+constexpr RenderScaleConfig kRenderScale{1.90F, 1.35F, 1.10F, 1.20F};
+constexpr float kTileWidth = 48.0F * kRenderScale.worldRenderScale;
+constexpr float kTileHeight = 24.0F * kRenderScale.worldRenderScale;
 constexpr float kCameraEdgeThreshold = 22.0F;
 constexpr float kCameraPanPixelsPerSecond = 420.0F;
+
+struct ProductionIconAsset {
+    std::string_view imageId;
+    std::string_view relativePath;
+};
+
+constexpr std::array<ProductionIconAsset, 4> kProductionIconAssets = {{
+    {"ui.production.icon.building", "assets/game/ra2/production/nacnst.shp"},
+    {"ui.production.icon.defense", "assets/game/ra2/production/naflak.shp"},
+    {"ui.production.icon.infantry", "assets/game/ra2/production/nahand.shp"},
+    {"ui.production.icon.vehicles", "assets/game/ra2/production/naweap.shp"},
+}};
 
 enum class AppMode {
     MainMenu,
@@ -396,7 +408,7 @@ public:
             error = SDL_GetError();
             return false;
         }
-        window_ = SDL_CreateWindow("RA2YR-bycpp - Editor Sandbox", 1280, 720,
+        window_ = SDL_CreateWindow("红色警戒2：尤里的复仇 - 主菜单", 1280, 720,
             SDL_WINDOW_RESIZABLE);
         if (window_ == nullptr) {
             error = SDL_GetError();
@@ -565,10 +577,10 @@ private:
             {"campaign", L"CAMPAIGN"}, {"load", L"LOAD GAME"}, {"skirmish", L"SKIRMISH"},
             {"online", L"ONLINE"}, {"lan", L"LAN"}, {"settings", L"SETTINGS"},
             {"statistics", L"STATISTICS"}, {"editor", L"MAP EDITOR"}, {"exit", L"EXIT GAME"},
-            {"unimplemented", L"NOT IMPLEMENTED"}, {"editor_title", L"EDITOR SANDBOX"},
-            {"red", L"RED"}, {"blue", L"BLUE"}, {"place_red", L"PLACE RED E2"}, {"place_blue", L"PLACE BLUE E2"},
-            {"cancel_place", L"CANCEL PLACEMENT"}, {"strategic", L"战略能力"}, {"production", L"生产栏"},
-            {"building", L"BUILDING"}, {"defense", L"DEFENSE"}, {"infantry", L"INFANTRY"}, {"vehicles", L"VEHICLES"},
+            {"unimplemented", L"尚未实现"}, {"editor_title", L"编辑器沙盒"},
+            {"red", L"红方"}, {"blue", L"蓝方"}, {"place_red", L"放置红方动员兵"}, {"place_blue", L"放置蓝方动员兵"},
+            {"cancel_place", L"取消放置"}, {"strategic", L"战略能力"}, {"production", L"生产栏"},
+            {"building", L"建筑"}, {"defense", L"防御"}, {"infantry", L"步兵"}, {"vehicles", L"载具"},
             {"unit_name", L"动员兵"}, {"owner", L"所有者"}, {"health", L"生命值"},
             {"weapon", L"武器"}, {"weapon_name", L"M1卡宾枪"}, {"armor", L"护甲"}, {"armor_name", L"轻型装甲"},
              {"move", L"移动"}, {"stop", L"停止"}, {"guard", L"警戒"}, {"attack", L"攻击"},
@@ -576,16 +588,17 @@ private:
              {"waypoint", L"路径点"}, {"attack_move", L"攻击/攻击移动"},
              {"minimap", L"小地图"}, {"unit_model", L"单位模型"}, {"unit_info", L"单位信息"},
              {"portrait", L"头像 / 动画预览"}, {"producer", L"产能建筑"}, {"tool", L"工具"},
-             {"terrain", L"Terrain"}, {"unit", L"Unit"}, {"object", L"对象"}, {"mode", L"模式"},
+             {"terrain", L"地形"}, {"unit", L"单位"}, {"object", L"对象"}, {"mode", L"模式"},
              {"select", L"选择"}, {"place", L"放置"}, {"collapse", L"收起"}, {"expand", L"展开"},
              {"sandbox_palette", L"沙盒工具"}, {"category", L"类别"}, {"current_object", L"当前对象"},
              {"tool_pointer", L"指针"}, {"tool_pencil", L"铅笔"}, {"tool_eraser", L"橡皮"},
              {"tool_brush", L"刷子"}, {"tool_fill", L"油漆桶"}, {"tool_eyedropper", L"取色器"},
              {"brush", L"刷子"}, {"rank", L"军阶"},
              {"faction_owner", L"所属"}, {"disabled", L"不可用"}, {"command_card", L"命令面板"},
+             {"target", L"目标"}, {"menu", L"菜单"}, {"none", L"未选择"}, {"resource", L"资源"},
              {"animation_idle", L"待机"}, {"animation_walk", L"行走"}, {"animation_attack", L"攻击"},
             {"animation_death", L"死亡"},
-            {"runtime", L"SIMULATION ONLINE"}, {"asset_missing", L"RUNTIME ASSETS NOT FOUND"},
+             {"runtime", L"运行中"}, {"asset_missing", L"缺少运行素材"},
         };
         westwood::IniDocument document;
         std::string error;
@@ -639,6 +652,15 @@ private:
                 return false;
             }
         }
+        for (const ProductionIconAsset& asset : kProductionIconAssets) {
+            westwood::ShpTsDocument icon;
+            const std::filesystem::path path = contentRoot_ / asset.relativePath;
+            if (!icon.load(path, error) || !renderer_.loadSpriteAsset(asset.imageId, icon, error)) {
+                assetError_ = utf8ToWide(error);
+                std::cerr << "[Content][Error] " << error << '\n';
+                return false;
+            }
+        }
         unitStatusArmorImageIds_.clear();
         unitStatusArmorImageIds_.emplace("light", "ui.unitstatus.armor");
         unitStatusWeaponImageIds_.clear();
@@ -664,7 +686,7 @@ private:
             }
         }
         assetReady_ = true;
-        std::cerr << "[Content] Loaded project Rules.ini, Art.ini, CONS.SHP and unittem.pal\n";
+        std::cerr << "[Content] Loaded project Rules.ini, Art.ini, CONS.SHP, production SHP icons and unittem.pal\n";
         std::cerr << "[Content] Runtime root: " << contentRoot_.string() << '\n';
         return true;
     }
@@ -680,8 +702,11 @@ private:
                 }
                 const bool alternate = ((x + y) & 1) != 0;
                 tiles.push_back({{static_cast<float>(x), static_cast<float>(y)}, kTileWidth, kTileHeight,
-                    alternate ? Color{0.10F, 0.25F, 0.14F, 1.0F} : Color{0.08F, 0.21F, 0.12F, 1.0F},
-                    {0.18F, 0.38F, 0.20F, 0.70F}});
+                    // The sandbox intentionally uses a high-contrast cement
+                    // test surface so cell boundaries and subcell placement
+                    // remain obvious during visual acceptance.
+                    alternate ? Color{0.40F, 0.42F, 0.43F, 1.0F} : Color{0.32F, 0.34F, 0.35F, 1.0F},
+                    {0.005F, 0.006F, 0.008F, 1.0F}});
             }
         }
         terrainTileCount_ = tiles.size();
@@ -855,6 +880,14 @@ private:
         }
     }
 
+    void setMode(AppMode mode) {
+        mode_ = mode;
+        if (window_ != nullptr) {
+            SDL_SetWindowTitle(window_, mode_ == AppMode::EditorSandbox ?
+                "红色警戒2：尤里的复仇 - 编辑器沙盒" : "红色警戒2：尤里的复仇 - 主菜单");
+        }
+    }
+
     void processKey(SDL_Keycode key) {
         if (key == SDLK_F3) {
             performance_.showOverlay = !performance_.showOverlay;
@@ -882,7 +915,7 @@ private:
             if (key == SDLK_ESCAPE) {
                 running_ = false;
             } else if (key == SDLK_E) {
-                mode_ = AppMode::EditorSandbox;
+                setMode(AppMode::EditorSandbox);
             }
             return;
         }
@@ -893,7 +926,7 @@ private:
                 placing_ = false;
                 editorTools_->state().tool = editor::EditorToolId::Pointer;
             } else {
-                mode_ = AppMode::MainMenu;
+                setMode(AppMode::MainMenu);
             }
         } else if (key == SDLK_M) {
             pendingAction_ = PendingAction::Move;
@@ -971,7 +1004,7 @@ private:
         if (!leftButton) {
             if (pendingAction_ != PendingAction::None) {
                 pendingAction_ = PendingAction::None;
-                toast_ = L"COMMAND CANCELLED";
+                toast_ = L"已取消当前命令";
                 toastTime_ = 1.5F;
             } else {
                 issueWorldAction(mouse_, PendingAction::None);
@@ -1050,7 +1083,7 @@ private:
 
     void activateMenuButton(std::size_t index) {
         if (index == 7) {
-            mode_ = AppMode::EditorSandbox;
+            setMode(AppMode::EditorSandbox);
         } else if (index == 8) {
             running_ = false;
         } else {
@@ -1205,11 +1238,16 @@ private:
         return true;
     }
 
+    Rect strategicCollapseRect() const {
+        return ui_.rect(strategicCollapsed_ ? "hud.strategic.collapse.collapsed" :
+            "hud.strategic.collapse");
+    }
+
     bool handleEditorUiClick() {
         if (handleSandboxPaletteClick()) {
             return true;
         }
-        if (ui_.rect("hud.strategic.collapse").contains(mouse_.x, mouse_.y)) {
+        if (strategicCollapseRect().contains(mouse_.x, mouse_.y)) {
             strategicCollapsed_ = !strategicCollapsed_;
             audio_.play(AudioCue::UIClick);
             return true;
@@ -1588,7 +1626,7 @@ private:
             for (int x = 0; x < terrainMap_.width(); ++x) {
                 if (terrainMap_.cell({x, y}).exists) {
                     const Color terrainColor = ((x + y) & 1) != 0 ?
-                        Color{0.12F, 0.28F, 0.16F, 1.0F} : Color{0.08F, 0.22F, 0.12F, 1.0F};
+                        Color{0.40F, 0.42F, 0.43F, 1.0F} : Color{0.32F, 0.34F, 0.35F, 1.0F};
                     const ScreenCoord center = mapProjection.project({static_cast<float>(x) + 0.5F,
                         static_cast<float>(y) + 0.5F});
                     const ScreenCoord top = mapProjection.project({static_cast<float>(x) + 0.5F,
@@ -1600,7 +1638,7 @@ private:
                     const ScreenCoord left = mapProjection.project({static_cast<float>(x),
                         static_cast<float>(y) + 0.5F});
                     renderer_.drawDiamond(center, right.x - left.x, bottom.y - top.y,
-                        terrainColor, {0.08F, 0.20F, 0.22F, 0.32F});
+                        terrainColor, {0.005F, 0.006F, 0.008F, 1.0F});
                 }
             }
         }
@@ -1664,8 +1702,8 @@ private:
             renderer_.drawText(label, rect, 12, enabled ? Color{1.0F, 0.86F, 0.28F, 1.0F} :
                 Color{0.38F, 0.40F, 0.42F, 1.0F});
         };
-        drawControl(layout.collapseButton, sandboxPaletteCollapsed_ ? L"+" : L"_", false);
-        drawControl(layout.closeButton, L"x", false);
+        drawControl(layout.collapseButton, sandboxPaletteCollapsed_ ? L"展" : L"收", false);
+        drawControl(layout.closeButton, L"×", false);
         if (sandboxPaletteCollapsed_) {
             return;
         }
@@ -1705,7 +1743,7 @@ private:
         drawTab(layout.unitButton, T("unit"),
             editorTools_->state().category == editor::EditorAssetCategory::Unit);
         drawTab(layout.buildingButton, T("building"), false, false);
-        drawTab(layout.resourceButton, L"资源", false, false);
+        drawTab(layout.resourceButton, T("resource"), false, false);
         const std::string& currentAsset = editorTools_->state().currentAsset();
         std::string assetName = currentAsset;
         if (editorTools_->state().category == editor::EditorAssetCategory::Terrain) {
@@ -1717,8 +1755,8 @@ private:
                 assetName = definition->name;
             }
         }
-        const std::wstring assetText = utf8ToWide(currentAsset + " / " + assetName);
-        renderer_.drawText(T("current_object") + L": " + assetText, layout.objectLabel, 14,
+        const std::wstring assetText = assetName.empty() ? T("none") : utf8ToWide(assetName);
+        renderer_.drawText(T("current_object") + L"：" + assetText, layout.objectLabel, 14,
             {0.92F, 0.84F, 0.34F, 1.0F}, false);
         const bool terrainCategory = editorTools_->state().category == editor::EditorAssetCategory::Terrain;
         const std::size_t assetCount = std::min(layout.assetCards.size(), terrainCategory ?
@@ -1758,7 +1796,7 @@ private:
             renderer_.drawText(label, layout.assetLabels[index], 12,
                 {1.0F, 0.86F, 0.24F, 1.0F});
         }
-        renderer_.drawText(T("faction_owner") + L":", layout.ownerLabel, 13,
+        renderer_.drawText(T("faction_owner") + L"：", layout.ownerLabel, 13,
             {0.72F, 0.76F, 0.72F, 1.0F}, false);
         drawControl(layout.redButton, T("red"),
             editorTools_->state().owner == Owner::Red);
@@ -1770,7 +1808,7 @@ private:
             presets.size() - 1U);
         const std::wstring brushText = presets.empty() ? L"--" : utf8ToWide(presets[brushIndex].id);
         renderer_.drawImage("ui.editor.dropdown", layout.brushSelector);
-        renderer_.drawText(L"刷子: " + brushText + L"  ▼", layout.brushSelector, 13,
+        renderer_.drawText(L"刷子：" + brushText + L"  ▼", layout.brushSelector, 13,
             {1.0F, 0.86F, 0.28F, 1.0F});
         if (brushPopupVisible_) {
             for (std::size_t index = 0; index < layout.brushOptions.size() && index < presets.size(); ++index) {
@@ -1778,7 +1816,7 @@ private:
                     editorTools_->state().brushPreset == index);
             }
         }
-        renderer_.drawText(T("rank") + L":", layout.rankLabel, 13, {0.72F, 0.76F, 0.72F, 1.0F}, false);
+        renderer_.drawText(T("rank") + L"：", layout.rankLabel, 13, {0.72F, 0.76F, 0.72F, 1.0F}, false);
         drawControl(layout.veterancyButton, L"新兵", false, false);
     }
 
@@ -1854,13 +1892,19 @@ private:
                 healthBarWidth * healthRatio, 4.0F * camera_.zoom}, healthColor);
         }
 
-        const Rect strategicRail = ui_.rect("hud.strategic.rail");
+        const Rect hudBackground = ui_.rect("hud.background");
+        renderer_.drawImage("ui.hud.background", hudBackground);
+
+        const Rect strategicRail = ui_.rect(strategicCollapsed_ ? "hud.strategic.rail.collapsed" :
+            "hud.strategic.rail");
         renderer_.drawImage("ui.hud.strategic.background", strategicRail);
         renderer_.drawImage("ui.hud.leftbar", ui_.rect("hud.strategic.leftbar"));
-        renderer_.drawImage("ui.hud.leftbar", ui_.rect("hud.strategic.rightbar"));
-        const Rect collapseButton = ui_.rect("hud.strategic.collapse");
+        if (!strategicCollapsed_) {
+            renderer_.drawImage("ui.hud.leftbar", ui_.rect("hud.strategic.rightbar"));
+        }
+        const Rect collapseButton = strategicCollapseRect();
         renderer_.drawImage("ui.hud.button", collapseButton);
-        renderer_.drawText(strategicCollapsed_ ? T("expand") : T("collapse"), collapseButton, 12,
+        renderer_.drawText(strategicCollapsed_ ? L"←" : T("collapse"), collapseButton, 12,
             {1.0F, 0.82F, 0.20F, 1.0F});
         if (!strategicCollapsed_) {
             renderer_.drawText(T("strategic"), ui_.rect("hud.strategic.title"), 14,
@@ -1880,11 +1924,11 @@ private:
         renderer_.drawText(L"10000", ui_.rect("hud.production.balance"), 28, {1.0F, 0.84F, 0.20F, 1.0F});
         renderer_.drawText(T("production"), ui_.rect("hud.production.title"), 20,
             {0.95F, 0.78F, 0.22F, 1.0F});
-        const std::string tabs[] = {"building", "defense", "infantry", "vehicles"};
         for (int index = 0; index < 4; ++index) {
             const Rect tab = ui_.rect("hud.production.tab." + std::to_string(index));
             renderer_.drawImage(index == activeTab_ ? "ui.hud.tab_hover" : "ui.hud.tab", tab);
-            renderer_.drawText(T(tabs[index]), tab, 16, {1.0F, 0.82F, 0.20F, 1.0F});
+            renderer_.drawSprite(kProductionIconAssets[static_cast<std::size_t>(index)].imageId, "unittem", 0,
+                Owner::Red, {tab.x + tab.width * 0.5F, tab.y + tab.height * 0.62F}, 0.34F);
         }
         renderer_.drawText(T("producer"), ui_.rect("hud.production.producer.title"), 16,
             {0.86F, 0.68F, 0.22F, 1.0F});
@@ -1895,13 +1939,9 @@ private:
         }
         for (int index = 0; index < 12; ++index) {
             const Rect product = ui_.rect("hud.production.product." + std::to_string(index));
-            renderer_.drawImage("ui.hud.button", product);
-            renderer_.drawText(L"--", {product.x, product.y + 12.0F, product.width, 28.0F}, 24,
-                {0.42F, 0.44F, 0.48F, 1.0F});
+            renderer_.drawImage("ui.hud.button", product, {0.42F, 0.44F, 0.46F, 1.0F});
         }
 
-        const Rect hudBackground = ui_.rect("hud.background");
-        renderer_.drawImage("ui.hud.background", hudBackground);
         const Rect miniMap = ui_.rect("hud.minimap");
         const Rect unitStatus = ui_.rect("hud.unitstatus");
         const Rect portrait = ui_.rect("hud.portrait");
@@ -1921,7 +1961,9 @@ private:
                 {modelViewport.x + modelViewport.width * 0.5F,
                     modelViewport.y + modelViewport.height * 0.55F},
                 kRenderScale.hudModelScale);
-            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner, {1275.0F, 1005.0F},
+            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner,
+                {portraitViewport.x + portraitViewport.width * 0.5F,
+                    portraitViewport.y + portraitViewport.height * 0.58F},
                 kRenderScale.hudPortraitScale);
         } else {
             renderer_.drawText(L"--", modelViewport, 28, {0.42F, 0.44F, 0.48F, 1.0F});
@@ -2038,9 +2080,11 @@ private:
         }
 
         const Rect card = ui_.rect("hud.command_card");
-        drawHudPanel(card, "ui.hud.commandcard.background", T("command_card"));
+        // The formal command-card skin has no title strip; all fifteen cells
+        // are square rects from UI.ini and use the same data for hit testing.
+        renderer_.drawImage("ui.hud.commandcard.background", card);
         if (pendingAction_ != PendingAction::None) {
-            renderer_.drawText(L"TARGET: " + pendingActionLabel(), ui_.childRect("hud.command_card", "hud.command_card.target"), 12,
+            renderer_.drawText(T("target") + L"：" + pendingActionLabel(), ui_.childRect("hud.command_card", "hud.command_card.target"), 12,
                 {1.0F, 0.34F, 0.18F, 1.0F}, false);
         }
         const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "", "", "", "", "", "", "", "", "", ""};
@@ -2061,7 +2105,7 @@ private:
 
         renderer_.drawText(T("editor_title"), ui_.rect("editor.title"), 21,
             {1.0F, 0.82F, 0.20F, 1.0F}, false);
-        renderer_.drawText(L"MENU", ui_.rect("editor.menu"), 17,
+        renderer_.drawText(T("menu"), ui_.rect("editor.menu"), 17,
             {1.0F, 0.84F, 0.24F, 1.0F});
         if (placing_) {
             renderer_.drawBorder(world, placingOwner_ == Owner::Red ? Color{1.0F, 0.12F, 0.08F, 1.0F} :

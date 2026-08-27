@@ -9,7 +9,10 @@ namespace ra2yr::simulation {
 namespace {
 
 constexpr float kPi = 3.14159265358979323846F;
-constexpr float kInfantrySubcellOffset = 0.30F;
+// Three infantry positions must remain visually distinct inside one ground
+// cell. This is the simulation's occupancy geometry, not a renderer-only
+// separation offset.
+constexpr float kInfantrySubcellOffset = 0.38F;
 
 WorldCoord toWorld(GridCoord coord) {
     return {static_cast<float>(coord.x), static_cast<float>(coord.y)};

@@ -170,3 +170,22 @@
 
 - CMake preset configure/generate PASS；MSVC x64 compile/link PASS；CTest `1/1 PASS`。
 - 实际 `ra2yr_client.exe` 启动保持响应，日志确认 SDL/D3D11、Rules/Art、CONS.SHP、unittem.pal 和 E2 VoiceSet 加载；运行截图位于被忽略的 `artifacts/round5-validation/`。
+
+## 2026-08-27 - 编辑器测试地块与异形 HUD 收口
+
+### 变更范围
+- 只收口 Editor Sandbox 的测试可视性和 HUD 布局；不新增第二单位、生产逻辑、AI、Trigger 或其他 Gameplay。
+
+### 具体改动
+- 将 Sandbox 地块改为高对比水泥色等距格，并使用黑色世界边线突出单格边界；提高 tile 与 Infantry subcell 的可读比例。
+- 将底部 HUD 调整为小地图、单位状态、2:3 头像/动画区和更高的 3x5 方形 Command Card；护甲/武器卡固定为方形并保留右下角升级徽记。
+- 战略栏支持向左收起；生产分类使用从 RA2/YR SHP 与 `unittem.pal` 读取的图标，产品栏保持两列，未接入真实 Producer 时显示禁用空槽。
+- Sandbox 工具控件和窗口标题改为中文；正式 Command Card 不再显示“命令面板”标题，绘制与输入继续共享 `UI.ini` rect。
+- 将本轮运行截图目录加入 Git 忽略；保留本地截图作为人工复核证据，不把截图、参考资料或 corpus 语料提交进分支。
+
+### 验证情况
+- `tools/dev/setup.ps1`、`tools/dev/build.ps1` 和 `tools/dev/test.ps1` 均已重新执行；MSVC x64 configure/build/link PASS，CTest `1/1 PASS`。
+- 实际运行 `ra2yr_client.exe` 并采集主菜单、Editor Sandbox 和 100 单位压力场景截图；截图只作为运行证据，不替代用户人工视觉/交互验收。
+
+### 风险
+- 高密度单位的血条和精灵仍可能在人工视觉验收中显得拥挤；本轮通过真实 Infantry occupancy subcell 和压力截图验证了不使用相同坐标重叠，但未扩展为完整编队渲染工具。

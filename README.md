@@ -204,7 +204,7 @@
 - `C++23 + CMake + SDL3 + Direct3D 11` 客户端工程骨架；
 - RA2/YR 红黑 CRT / 银灰金属控制台主菜单，使用独立图片按钮和 hover/pressed 状态；DTA/CnCNet 仅作组件结构参考；
 - 同一 EXE 内的 Editor/Sandbox 模式；
-- 程序化 64x64 等距草地开发地图；
+- 程序化 64x64 高对比水泥地等距开发测试地图（用于清楚观察格子和单位占位）；
 - Rules 驱动 E2/M1Carbine/SA/InvisibleLow 数据读取；
 - 项目自有最小运行素材中的真实 `CONS.SHP`、`unittem.pal` 读取与红蓝 owner remap；
 - 选择、移动、停止、Hold、巡逻、Attack Move、攻击、扣血和死亡；

@@ -8,7 +8,7 @@ This milestone creates one executable with two explicit modes:
 MainMenu -> EditorSandbox
 ```
 
-The sandbox uses a static 64x64 grass isometric mesh and the project-owned minimum `assets/game/ra2/` runtime assets. It demonstrates red/blue owners, selection, movement, stop, hold, patrol, attack-move, attack, damage and death without requiring the full compatibility corpus.
+The sandbox uses a static 64x64 high-contrast cement isometric test mesh and the project-owned minimum `assets/game/ra2/` runtime assets. It demonstrates red/blue owners, selection, movement, stop, hold, patrol, attack-move, attack, damage and death without requiring the full compatibility corpus.
 
 The lower-right command card is deliberately 3 rows by 5 columns. It is not a screenshot and each enabled command routes to the Simulation command path.
 

@@ -109,7 +109,9 @@ void appendStaticDiamond(std::vector<D3D11Renderer::Vertex>& vertices, float lef
         if (length <= 0.0001F) {
             return;
         }
-        constexpr float kWorldThickness = 1.0F;
+        // Keep the sandbox cell boundary readable at the current test zoom;
+        // this is a world-space edge, so it scales with the camera like the tile.
+        constexpr float kWorldThickness = 2.0F;
         const float nx = -dy / length * kWorldThickness * 0.5F;
         const float ny = dx / length * kWorldThickness * 0.5F;
         const ScreenCoord a{start.x + nx, start.y + ny};
