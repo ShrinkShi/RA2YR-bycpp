@@ -1,6 +1,7 @@
 #include "GameData/Rules.h"
 #include "Engine/Core/Utf.h"
 #include "GameData/Art.h"
+#include "GameData/Localization.h"
 #include "GameData/Terrain.h"
 #include "GameData/Veterancy.h"
 #include "Editor/EditorToolController.h"
@@ -26,6 +27,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -57,13 +59,14 @@ constexpr float kCameraPanPixelsPerSecond = 420.0F;
 struct ProductionIconAsset {
     std::string_view imageId;
     std::string_view relativePath;
+    std::string_view paletteId;
 };
 
 constexpr std::array<ProductionIconAsset, 4> kProductionIconAssets = {{
-    {"ui.production.icon.building", "assets/game/ra2/production/nacnst.shp"},
-    {"ui.production.icon.defense", "assets/game/ra2/production/naflak.shp"},
-    {"ui.production.icon.infantry", "assets/game/ra2/production/nahand.shp"},
-    {"ui.production.icon.vehicles", "assets/game/ra2/production/naweap.shp"},
+    {"ui.production.icon.building", "assets/game/ra2/production/tab00.shp", "sidebar"},
+    {"ui.production.icon.defense", "assets/game/ra2/production/tab01.shp", "sidebar"},
+    {"ui.production.icon.infantry", "assets/game/ra2/production/tab02.shp", "sidebar"},
+    {"ui.production.icon.vehicles", "assets/game/ra2/production/tab03.shp", "sidebar"},
 }};
 
 enum class AppMode {
@@ -82,6 +85,7 @@ enum class PendingAction {
     Patrol,
     AttackMove,
     Attack,
+    ForceAttack,
 };
 
 struct MenuButton {
@@ -221,6 +225,9 @@ public:
         }
     }
 
+    void setVolume(float volume) { masterVolume_ = std::clamp(volume, 0.0F, 1.0F); }
+    [[nodiscard]] float volume() const { return masterVolume_; }
+
     void play(AudioCue cue) {
         if (isVoiceCue(cue)) {
             playVoice(cue);
@@ -266,8 +273,17 @@ private:
             set.lastSampleIndex = static_cast<int>(sampleIndex);
             lastVoiceSample_ = set.names[sampleIndex];
             std::cerr << "[Audio] Playing " << cueName(cue) << " sample " << lastVoiceSample_ << '\n';
-            if (!SDL_PutAudioStreamData(voiceStream_, set.samples[sampleIndex].data(),
-                static_cast<int>(set.samples[sampleIndex].size() * sizeof(float)))) {
+            const std::vector<float>* samples = &set.samples[sampleIndex];
+            std::vector<float> scaledSamples;
+            if (masterVolume_ != 1.0F) {
+                scaledSamples = set.samples[sampleIndex];
+                for (float& sample : scaledSamples) {
+                    sample *= masterVolume_;
+                }
+                samples = &scaledSamples;
+            }
+            if (!SDL_PutAudioStreamData(voiceStream_, samples->data(),
+                static_cast<int>(samples->size() * sizeof(float)))) {
                 std::cerr << "[Audio] Voice queue failed: " << SDL_GetError() << '\n';
             }
             return;
@@ -284,7 +300,7 @@ private:
         }
     }
 
-    static void playProcedural(SDL_AudioStream* stream, AudioCue cue) {
+    void playProcedural(SDL_AudioStream* stream, AudioCue cue) const {
         if (stream == nullptr) {
             return;
         }
@@ -298,7 +314,7 @@ private:
             const float attack = std::min(1.0F, static_cast<float>(index) / 160.0F);
             const float release = std::min(1.0F, static_cast<float>(sampleCount - index) / 900.0F);
             const float envelope = attack * release;
-            samples[static_cast<std::size_t>(index)] = settings.volume * envelope *
+            samples[static_cast<std::size_t>(index)] = settings.volume * masterVolume_ * envelope *
                 (std::sin(2.0F * pi * settings.frequency * t) +
                     0.30F * std::sin(2.0F * pi * settings.secondFrequency * t));
         }
@@ -398,6 +414,7 @@ private:
     std::uint32_t voiceAckCount_ = 0;
     std::string lastVoiceEvent_;
     std::string lastVoiceSample_;
+    float masterVolume_ = 1.0F;
 };
 
 class ClientApp {
@@ -428,7 +445,9 @@ public:
         const Rect viewport = worldViewport();
         camera_.viewportCenter = {viewport.x + viewport.width * 0.5F,
             viewport.y + viewport.height * 0.5F};
-        camera_.worldCenter = {0.0F, 0.0F};
+        // Frame the existing four-unit acceptance formation so the sandbox
+        // starts with both owner colors and their subcells visible.
+        camera_.worldCenter = {14.0F, 10.0F};
         loadStrings();
         if (!loadRuntimeAssets(error)) {
             return false;
@@ -583,7 +602,7 @@ private:
             {"building", L"建筑"}, {"defense", L"防御"}, {"infantry", L"步兵"}, {"vehicles", L"载具"},
             {"unit_name", L"动员兵"}, {"owner", L"所有者"}, {"health", L"生命值"},
             {"weapon", L"武器"}, {"weapon_name", L"M1卡宾枪"}, {"armor", L"护甲"}, {"armor_name", L"轻型装甲"},
-             {"move", L"移动"}, {"stop", L"停止"}, {"guard", L"警戒"}, {"attack", L"攻击"},
+             {"move", L"移动"}, {"stop", L"停止"}, {"guard", L"警戒"}, {"attack", L"攻击"}, {"force_attack", L"强制攻击"},
              {"deploy", L"部署"}, {"hold", L"原地不动"}, {"patrol", L"巡逻"}, {"repair", L"维修"},
              {"waypoint", L"路径点"}, {"attack_move", L"攻击/攻击移动"},
              {"minimap", L"小地图"}, {"unit_model", L"单位模型"}, {"unit_info", L"单位信息"},
@@ -595,9 +614,11 @@ private:
              {"tool_brush", L"刷子"}, {"tool_fill", L"油漆桶"}, {"tool_eyedropper", L"取色器"},
              {"brush", L"刷子"}, {"rank", L"军阶"},
              {"faction_owner", L"所属"}, {"disabled", L"不可用"}, {"command_card", L"命令面板"},
-             {"target", L"目标"}, {"menu", L"菜单"}, {"none", L"未选择"}, {"resource", L"资源"},
+             {"target", L"目标"}, {"move_target", L"移动地点"}, {"attack_target", L"攻击目标"},
+             {"menu", L"菜单"}, {"none", L"未选择"}, {"resource", L"资源"},
              {"animation_idle", L"待机"}, {"animation_walk", L"行走"}, {"animation_attack", L"攻击"},
-            {"animation_death", L"死亡"},
+            {"animation_death", L"死亡"}, {"language", L"语言"}, {"language_zh", L"中文"},
+            {"language_en", L"English"}, {"volume", L"音量"}, {"settings_close", L"关闭"},
              {"runtime", L"运行中"}, {"asset_missing", L"缺少运行素材"},
         };
         westwood::IniDocument document;
@@ -610,6 +631,50 @@ private:
                 }
             }
         }
+        loadLocale(language_);
+    }
+
+    void loadLocale(const std::string& language) {
+        std::string error;
+        if (!localization_.load(contentRoot_ / "assets/ui/locales" / (language + ".json"), error)) {
+            std::cerr << "[Locale][Warning] " << error << '\n';
+            return;
+        }
+        for (auto& [key, value] : strings_) {
+            const std::string localized = localization_.get(key);
+            if (!localized.empty()) {
+                value = utf8ToWide(localized);
+            }
+        }
+    }
+
+    [[nodiscard]] std::string localizedName(std::string_view key, std::string_view fallback) const {
+        return localization_.get(key, fallback);
+    }
+
+    bool handleSettingsClick() {
+        if (!settingsVisible_) {
+            return false;
+        }
+        if (ui_.rect("settings.language.zh").contains(mouse_.x, mouse_.y)) {
+            language_ = "zh_cn";
+            loadLocale(language_);
+        } else if (ui_.rect("settings.language.en").contains(mouse_.x, mouse_.y)) {
+            language_ = "en_us";
+            loadLocale(language_);
+        } else if (ui_.rect("settings.volume.minus").contains(mouse_.x, mouse_.y)) {
+            volume_ = std::clamp(volume_ - 0.1F, 0.0F, 1.0F);
+            audio_.setVolume(volume_);
+        } else if (ui_.rect("settings.volume.plus").contains(mouse_.x, mouse_.y)) {
+            volume_ = std::clamp(volume_ + 0.1F, 0.0F, 1.0F);
+            audio_.setVolume(volume_);
+        } else if (ui_.rect("settings.close").contains(mouse_.x, mouse_.y)) {
+            settingsVisible_ = false;
+        } else {
+            return true;
+        }
+        audio_.play(AudioCue::UIClick);
+        return true;
     }
 
     bool loadRuntimeAssets(std::string& error) {
@@ -617,9 +682,12 @@ private:
         const std::filesystem::path artPath = contentRoot_ / "INI/Art.ini";
         const std::filesystem::path spritePath = contentRoot_ / "assets/game/ra2/infantry/CONS.SHP";
         const std::filesystem::path palettePath = contentRoot_ / "assets/game/ra2/palettes/unittem.pal";
+        const std::filesystem::path sidebarPalettePath = contentRoot_ / "assets/game/ra2/palettes/sidebar.pal";
         if (!rules_.load(rulesPath, error) || !art_.load(artPath, error) ||
             !palette_.load(palettePath, error) || !sprite_.load(spritePath, error) ||
+            !sidebarPalette_.load(sidebarPalettePath, error) ||
             !renderer_.loadPalette("unittem", palette_, error) ||
+            !renderer_.loadPalette("sidebar", sidebarPalette_, error) ||
             !renderer_.loadSpriteAsset("CONS", sprite_, error)) {
             assetError_ = utf8ToWide(error);
             std::cerr << "[Content][Error] " << error << '\n';
@@ -705,8 +773,8 @@ private:
                     // The sandbox intentionally uses a high-contrast cement
                     // test surface so cell boundaries and subcell placement
                     // remain obvious during visual acceptance.
-                    alternate ? Color{0.40F, 0.42F, 0.43F, 1.0F} : Color{0.32F, 0.34F, 0.35F, 1.0F},
-                    {0.005F, 0.006F, 0.008F, 1.0F}});
+                     alternate ? Color{0.40F, 0.42F, 0.43F, 1.0F} : Color{0.32F, 0.34F, 0.35F, 1.0F},
+                     {0.0F, 0.0F, 0.0F, 1.0F}});
             }
         }
         terrainTileCount_ = tiles.size();
@@ -913,7 +981,11 @@ private:
         }
         if (mode_ == AppMode::MainMenu) {
             if (key == SDLK_ESCAPE) {
-                running_ = false;
+                if (settingsVisible_) {
+                    settingsVisible_ = false;
+                } else {
+                    running_ = false;
+                }
             } else if (key == SDLK_E) {
                 setMode(AppMode::EditorSandbox);
             }
@@ -944,6 +1016,8 @@ private:
             pendingAction_ = PendingAction::Patrol;
         } else if (key == SDLK_A) {
             pendingAction_ = PendingAction::AttackMove;
+        } else if (key == SDLK_K) {
+            pendingAction_ = PendingAction::ForceAttack;
         } else if (key == SDLK_R) {
             placingOwner_ = Owner::Red;
             editorTool_ = EditorTool::Unit;
@@ -990,6 +1064,9 @@ private:
         }
         if (mode_ == AppMode::MainMenu) {
             if (!leftButton) {
+                return;
+            }
+            if (settingsVisible_ && handleSettingsClick()) {
                 return;
             }
             for (std::size_t i = 0; i < menuButtons_.size(); ++i) {
@@ -1084,6 +1161,8 @@ private:
     void activateMenuButton(std::size_t index) {
         if (index == 7) {
             setMode(AppMode::EditorSandbox);
+        } else if (index == 5) {
+            settingsVisible_ = true;
         } else if (index == 8) {
             running_ = false;
         } else {
@@ -1291,6 +1370,8 @@ private:
                     pendingAction_ = PendingAction::Patrol;
                 } else if (slot == 4) {
                     pendingAction_ = PendingAction::AttackMove;
+                } else if (slot == 5) {
+                    pendingAction_ = PendingAction::ForceAttack;
                 }
                 return true;
             }
@@ -1330,15 +1411,35 @@ private:
                 simulation_->issueAttack(target);
                 audio_.play(AudioCue::VoiceAttackAcknowledgement);
             }
+        } else if (action == PendingAction::ForceAttack) {
+            if (hasSelection) {
+                simulation_->issueForceAttack(destination, unitAt(position));
+                audio_.play(AudioCue::VoiceAttackAcknowledgement);
+                targetIndicator_ = screenToWorld(position);
+                targetIndicatorColor_ = {1.0F, 0.12F, 0.08F, 1.0F};
+                targetIndicatorTime_ = 1.0F;
+            }
         } else {
             const std::uint32_t target = unitAt(position);
             if (hasSelection && isEnemyTarget(target)) {
                 simulation_->issueAttack(target);
                 audio_.play(AudioCue::VoiceAttackAcknowledgement);
+                targetIndicator_ = screenToWorld(position);
+                targetIndicatorColor_ = {1.0F, 0.12F, 0.08F, 1.0F};
+                targetIndicatorTime_ = 1.0F;
             } else if (hasSelection) {
                 simulation_->issueMove(destination);
                 audio_.play(AudioCue::VoiceMoveAcknowledgement);
+                targetIndicator_ = screenToWorld(position);
+                targetIndicatorColor_ = {0.18F, 1.0F, 0.34F, 1.0F};
+                targetIndicatorTime_ = 1.0F;
             }
+        }
+        if (action == PendingAction::Move || action == PendingAction::Patrol || action == PendingAction::AttackMove) {
+            targetIndicator_ = screenToWorld(position);
+            targetIndicatorColor_ = action == PendingAction::AttackMove ?
+                Color{1.0F, 0.12F, 0.08F, 1.0F} : Color{0.18F, 1.0F, 0.34F, 1.0F};
+            targetIndicatorTime_ = 1.0F;
         }
         if (action != PendingAction::None && hasSelection) {
             pendingAction_ = PendingAction::None;
@@ -1459,6 +1560,7 @@ private:
         case PendingAction::Patrol: return T("patrol");
         case PendingAction::AttackMove: return T("attack_move");
         case PendingAction::Attack: return T("attack");
+        case PendingAction::ForceAttack: return T("force_attack");
         case PendingAction::None: return {};
         }
         return {};
@@ -1478,6 +1580,9 @@ private:
 
     void render() {
         renderer_.beginFrame();
+        if (targetIndicatorTime_ > 0.0F) {
+            targetIndicatorTime_ -= 1.0F / 60.0F;
+        }
         if (mode_ == AppMode::MainMenu) {
             renderMainMenu();
         } else {
@@ -1607,12 +1712,45 @@ private:
             renderer_.drawText(T(button.key), button.rect, 18, {1.0F, 0.86F, 0.20F, 1.0F});
         }
         renderer_.drawText(L"RED COMMAND CONSOLE  //  C++23 / SDL3 / D3D11", {350.0F, 1008.0F, 1220.0F, 28.0F}, 14, {0.72F, 0.34F, 0.18F, 1.0F}, false);
+        if (settingsVisible_) {
+            const Rect panel = ui_.rect("settings.panel");
+            renderer_.drawRect(panel, {0.015F, 0.012F, 0.010F, 0.98F});
+            renderer_.drawBorder(panel, {0.76F, 0.46F, 0.12F, 1.0F}, 3.0F);
+            renderer_.drawText(T("settings"), {panel.x + 24.0F, panel.y + 20.0F,
+                panel.width - 48.0F, 42.0F}, 26, {1.0F, 0.84F, 0.26F, 1.0F});
+            renderer_.drawText(T("language"), ui_.rect("settings.language.label"), 16,
+                {0.80F, 0.82F, 0.78F, 1.0F});
+            const Rect languageZh = ui_.rect("settings.language.zh");
+            const Rect languageEn = ui_.rect("settings.language.en");
+            renderer_.drawImage(language_ == "zh_cn" ? "ui.hud.button_hover" : "ui.hud.button", languageZh);
+            renderer_.drawImage(language_ == "en_us" ? "ui.hud.button_hover" : "ui.hud.button", languageEn);
+            renderer_.drawText(T("language_zh"), languageZh, 15, {1.0F, 0.86F, 0.24F, 1.0F});
+            renderer_.drawText(T("language_en"), languageEn, 15, {1.0F, 0.86F, 0.24F, 1.0F});
+            renderer_.drawText(T("volume"), ui_.rect("settings.volume.label"), 16,
+                {0.80F, 0.82F, 0.78F, 1.0F});
+            const Rect minus = ui_.rect("settings.volume.minus");
+            const Rect volumeBar = ui_.rect("settings.volume.bar");
+            const Rect plus = ui_.rect("settings.volume.plus");
+            renderer_.drawImage("ui.hud.button", minus);
+            renderer_.drawImage("ui.hud.button", plus);
+            renderer_.drawText(L"-", minus, 22, {1.0F, 0.86F, 0.24F, 1.0F});
+            renderer_.drawText(L"+", plus, 22, {1.0F, 0.86F, 0.24F, 1.0F});
+            renderer_.drawRect(volumeBar, {0.05F, 0.05F, 0.06F, 1.0F});
+            renderer_.drawRect({volumeBar.x, volumeBar.y, volumeBar.width * volume_, volumeBar.height},
+                {0.72F, 0.18F, 0.06F, 1.0F});
+            renderer_.drawBorder(volumeBar, {0.66F, 0.46F, 0.16F, 1.0F}, 2.0F);
+            renderer_.drawText(std::to_wstring(static_cast<int>(std::lround(volume_ * 100.0F))) + L"%",
+                volumeBar, 14, {1.0F, 0.90F, 0.42F, 1.0F});
+            const Rect close = ui_.rect("settings.close");
+            renderer_.drawImage("ui.hud.button", close);
+            renderer_.drawText(T("settings_close"), close, 15, {1.0F, 0.86F, 0.24F, 1.0F});
+        }
     }
 
     void drawHudPanel(Rect panel, const std::string& backgroundAsset, const std::wstring& title) {
         renderer_.drawImage(backgroundAsset, panel);
         renderer_.drawText(title, {panel.x + 12.0F, panel.y + 7.0F, panel.width - 24.0F, 26.0F}, 16,
-            {1.0F, 0.82F, 0.20F, 1.0F}, false);
+            {1.0F, 0.82F, 0.20F, 1.0F});
     }
 
     void renderMiniMap(Rect panel) {
@@ -1748,11 +1886,11 @@ private:
         std::string assetName = currentAsset;
         if (editorTools_->state().category == editor::EditorAssetCategory::Terrain) {
             if (const gamedata::TerrainDefinition* definition = terrainDatabase_.find(currentAsset)) {
-                assetName = definition->uiName;
+                assetName = localizedName("terrain." + definition->id + ".name", definition->uiName);
             }
         } else if (editorTools_->state().category == editor::EditorAssetCategory::Unit) {
             if (const gamedata::UnitDefinition* definition = rules_.findUnit(currentAsset)) {
-                assetName = definition->name;
+                assetName = localizedName("unit." + definition->id + ".name", definition->name);
             }
         }
         const std::wstring assetText = assetName.empty() ? T("none") : utf8ToWide(assetName);
@@ -1769,7 +1907,7 @@ private:
             if (terrainCategory && index < terrainDatabase_.definitions().size()) {
                 const auto& definition = terrainDatabase_.definitions()[index];
                 active = currentAsset == definition.id;
-                label = utf8ToWide(definition.uiName);
+                label = utf8ToWide(localizedName("terrain." + definition.id + ".name", definition.uiName));
                 const auto icon = terrainPaletteImageIds_.find(definition.id);
                 if (icon != terrainPaletteImageIds_.end()) {
                     renderer_.drawImage(icon->second, layout.assetIcons[index]);
@@ -1777,7 +1915,7 @@ private:
             } else if (!terrainCategory && index < rules_.infantry().size()) {
                 const auto& definition = rules_.infantry()[index];
                 active = currentAsset == definition.id;
-                label = utf8ToWide(definition.name);
+                label = utf8ToWide(localizedName("unit." + definition.id + ".name", definition.name));
                 if (assetReady_) {
                     const auto* animation = art_.find(definition.image);
                     if (animation != nullptr) {
@@ -1840,6 +1978,34 @@ private:
         }
     }
 
+    void drawTargetIndicators() {
+        if (!hasSelectedUnits()) {
+            return;
+        }
+        std::optional<WorldCoord> target = targetIndicatorTime_ > 0.0F ? targetIndicator_ : std::nullopt;
+        Color color = targetIndicatorColor_;
+        if (pendingAction_ != PendingAction::None && inWorld(mouse_)) {
+            target = screenToWorld(mouse_);
+            color = (pendingAction_ == PendingAction::Attack || pendingAction_ == PendingAction::ForceAttack ||
+                pendingAction_ == PendingAction::AttackMove) ?
+                Color{1.0F, 0.12F, 0.08F, 1.0F} : Color{0.18F, 1.0F, 0.34F, 1.0F};
+        }
+        if (!target.has_value()) {
+            return;
+        }
+        const ScreenCoord targetScreen = gridToScreen(*target);
+        for (const auto& entity : simulation_->entities()) {
+            if (entity.health > 0 && entity.selected) {
+                renderer_.drawLine(gridToScreen(entity.position), targetScreen, color, 2.5F);
+            }
+        }
+        renderer_.drawCircle(targetScreen, 9.0F, color, 2.0F, false);
+        renderer_.drawLine({targetScreen.x - 13.0F, targetScreen.y},
+            {targetScreen.x + 13.0F, targetScreen.y}, color, 2.0F);
+        renderer_.drawLine({targetScreen.x, targetScreen.y - 13.0F},
+            {targetScreen.x, targetScreen.y + 13.0F}, color, 2.0F);
+    }
+
     void renderEditor() {
         renderer_.setWorldStats(terrainTileCount_, simulation_->entities().size());
         renderer_.setWorldCamera(camera_.worldCenter, camera_.zoom, camera_.viewportCenter,
@@ -1892,8 +2058,7 @@ private:
                 healthBarWidth * healthRatio, 4.0F * camera_.zoom}, healthColor);
         }
 
-        const Rect hudBackground = ui_.rect("hud.background");
-        renderer_.drawImage("ui.hud.background", hudBackground);
+        drawTargetIndicators();
 
         const Rect strategicRail = ui_.rect(strategicCollapsed_ ? "hud.strategic.rail.collapsed" :
             "hud.strategic.rail");
@@ -1927,8 +2092,9 @@ private:
         for (int index = 0; index < 4; ++index) {
             const Rect tab = ui_.rect("hud.production.tab." + std::to_string(index));
             renderer_.drawImage(index == activeTab_ ? "ui.hud.tab_hover" : "ui.hud.tab", tab);
-            renderer_.drawSprite(kProductionIconAssets[static_cast<std::size_t>(index)].imageId, "unittem", 0,
-                Owner::Red, {tab.x + tab.width * 0.5F, tab.y + tab.height * 0.62F}, 0.34F);
+            const ProductionIconAsset& icon = kProductionIconAssets[static_cast<std::size_t>(index)];
+            renderer_.drawSprite(icon.imageId, icon.paletteId, 0, Owner::Neutral,
+                {tab.x + tab.width * 0.5F, tab.y + tab.height * 0.52F}, 0.90F);
         }
         renderer_.drawText(T("producer"), ui_.rect("hud.production.producer.title"), 16,
             {0.86F, 0.68F, 0.22F, 1.0F});
@@ -1975,30 +2141,41 @@ private:
         } else {
             const gamedata::UnitDefinition* definition = rules_.findUnit(selected->definitionId);
             if (definition != nullptr) {
-                const hud::UnitStatusViewModel status = hud::UnitStatusViewModelBuilder::build(
+            hud::UnitStatusViewModel status = hud::UnitStatusViewModelBuilder::build(
                     *selected, *definition, rules_, veterancy_, playerUpgrades_,
                     ui_.setting("HUD.UnitStatus", "HealthyThreshold", 0.60F),
                     ui_.setting("HUD.UnitStatus", "CriticalThreshold", 0.30F));
+                status.displayName = localizedName("unit." + definition->id + ".name", status.displayName);
+                status.secondaryName = localizedName("unit." + definition->id + ".secondary", status.secondaryName);
+                status.veterancyName = localizedName("veterancy." + selected->veterancyLevel + ".name",
+                    status.veterancyName);
+                status.armor.uiName = localizedName("armor." + status.armor.id + ".name", status.armor.uiName);
+                for (auto& weapon : status.weapons) {
+                    weapon.uiName = localizedName("weapon." + weapon.id + ".name", weapon.uiName);
+                }
+                for (std::size_t index = 0; index < status.tags.size() && index < definition->unitTags.size(); ++index) {
+                    status.tags[index] = localizedName("tag." + definition->unitTags[index] + ".name", status.tags[index]);
+                }
                 const Color healthColor = status.healthBand == hud::HealthBand::Healthy ?
                     Color{0.30F, 1.0F, 0.34F, 1.0F} : status.healthBand == hud::HealthBand::Warning ?
                     Color{1.0F, 0.84F, 0.18F, 1.0F} : Color{1.0F, 0.20F, 0.12F, 1.0F};
                 renderer_.drawText(utf8ToWide(status.displayName),
-                    ui_.childRect("hud.unitstatus", "hud.unitstatus.name"), 24,
-                    {1.0F, 0.82F, 0.20F, 1.0F}, false);
+                    ui_.childRect("hud.unitstatus", "hud.unitstatus.name"), 20,
+                    {1.0F, 0.82F, 0.20F, 1.0F});
                 renderer_.drawText(utf8ToWide(status.secondaryName),
-                    ui_.childRect("hud.unitstatus", "hud.unitstatus.secondary"), 16,
-                    {0.70F, 0.76F, 0.78F, 1.0F}, false);
+                    ui_.childRect("hud.unitstatus", "hud.unitstatus.secondary"), 13,
+                    {0.70F, 0.76F, 0.78F, 1.0F});
                 renderer_.drawText(L"击杀：" + std::to_wstring(status.kills),
-                    ui_.childRect("hud.unitstatus", "hud.unitstatus.kills"), 15,
-                    {0.92F, 0.86F, 0.36F, 1.0F}, false);
+                    ui_.childRect("hud.unitstatus", "hud.unitstatus.kills"), 13,
+                    {0.92F, 0.86F, 0.36F, 1.0F});
                 renderer_.drawText(L"等级：" + utf8ToWide(status.veterancyName),
-                    ui_.childRect("hud.unitstatus", "hud.unitstatus.veterancy"), 15,
-                    {0.92F, 0.86F, 0.36F, 1.0F}, false);
+                    ui_.childRect("hud.unitstatus", "hud.unitstatus.veterancy"), 13,
+                    {0.92F, 0.86F, 0.36F, 1.0F});
                 const std::wstring experience = status.nextExperience > 0 ?
                     L"经验：" + std::to_wstring(status.experience) + L" / " +
                     std::to_wstring(status.nextExperience) : L"经验：MAX";
-                renderer_.drawText(experience, ui_.childRect("hud.unitstatus", "hud.unitstatus.experience"), 14,
-                    {0.72F, 0.84F, 0.86F, 1.0F}, false);
+                renderer_.drawText(experience, ui_.childRect("hud.unitstatus", "hud.unitstatus.experience"), 12,
+                    {0.72F, 0.84F, 0.86F, 1.0F});
                 std::wstring tags;
                 for (std::size_t index = 0; index < status.tags.size(); ++index) {
                     if (index != 0) {
@@ -2006,12 +2183,12 @@ private:
                     }
                     tags += utf8ToWide(status.tags[index]);
                 }
-                renderer_.drawText(tags, ui_.childRect("hud.unitstatus", "hud.unitstatus.tags"), 14,
-                    {0.72F, 0.84F, 0.86F, 1.0F}, false);
+                renderer_.drawText(tags, ui_.childRect("hud.unitstatus", "hud.unitstatus.tags"), 11,
+                    {0.72F, 0.84F, 0.86F, 1.0F});
 
                 renderer_.drawText(T("health") + L"：" + std::to_wstring(status.health) + L" / " +
                     std::to_wstring(status.maxHealth), ui_.childRect("hud.unitstatus", "hud.unitstatus.health"),
-                    14, healthColor, false);
+                    12, healthColor);
                 if (!status.shields.empty()) {
                     int totalShield = 0;
                     for (const auto& shield : status.shields) {
@@ -2019,12 +2196,12 @@ private:
                     }
                     renderer_.drawText(L"护盾：" + std::to_wstring(totalShield),
                         ui_.childRect("hud.unitstatus", "hud.unitstatus.shield"), 12,
-                        {0.38F, 0.78F, 1.0F, 1.0F}, false);
+                        {0.38F, 0.78F, 1.0F, 1.0F});
                 }
                 if (status.maxEnergy > 0) {
                     renderer_.drawText(L"能量：" + std::to_wstring(status.energy) + L" / " +
                         std::to_wstring(status.maxEnergy), ui_.childRect("hud.unitstatus", "hud.unitstatus.energy"),
-                        12, {0.72F, 0.84F, 0.86F, 1.0F}, false);
+                        11, {0.72F, 0.84F, 0.86F, 1.0F});
                 }
 
                 const Rect cardArea = ui_.childRect("hud.unitstatus", "hud.unitstatus.cards");
@@ -2069,11 +2246,16 @@ private:
                 }
                 if (!hoveredTooltip.empty()) {
                     const Rect tooltip = ui_.childRect("hud.unitstatus", "hud.unitstatus.tooltip");
+                    // Tooltip is a modal visual layer.  Its opaque backing
+                    // must hide the status text underneath when the card is
+                    // hovered, even if a mod supplies a translucent image.
+                    renderer_.drawRect(tooltip, {0.008F, 0.010F, 0.014F, 0.98F});
+                    renderer_.drawBorder(tooltip, {0.74F, 0.42F, 0.10F, 1.0F}, 2.0F);
                     renderer_.drawImage("ui.unitstatus.tooltip", tooltip);
                     const Rect tooltipTextRelative = ui_.relativeRect("hud.unitstatus.tooltip.text");
                     renderer_.drawText(hoveredTooltip,
                         {tooltip.x + tooltipTextRelative.x, tooltip.y + tooltipTextRelative.y,
-                            tooltipTextRelative.width, tooltipTextRelative.height}, 13,
+                            tooltipTextRelative.width, tooltipTextRelative.height}, 11,
                         {1.0F, 0.92F, 0.62F, 1.0F}, false);
                 }
             }
@@ -2087,14 +2269,15 @@ private:
             renderer_.drawText(T("target") + L"：" + pendingActionLabel(), ui_.childRect("hud.command_card", "hud.command_card.target"), 12,
                 {1.0F, 0.34F, 0.18F, 1.0F}, false);
         }
-        const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "", "", "", "", "", "", "", "", "", ""};
+        const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "force_attack", "", "", "", "", "", "", "", "", ""};
         for (int slot = 0; slot < 15; ++slot) {
             const Rect button = ui_.childRect("hud.command_card",
                 "hud.command_card.slot." + std::to_string(slot));
             const bool hot = button.contains(mouse_.x, mouse_.y);
             const bool active = (slot == 0 && pendingAction_ == PendingAction::Move) ||
                 (slot == 3 && pendingAction_ == PendingAction::Patrol) ||
-                (slot == 4 && pendingAction_ == PendingAction::AttackMove);
+                (slot == 4 && pendingAction_ == PendingAction::AttackMove) ||
+                (slot == 5 && pendingAction_ == PendingAction::ForceAttack);
             renderer_.drawImage(hot || active ? "ui.hud.button_hover" : "ui.hud.button", button,
                 active ? Color{1.0F, 0.78F, 0.38F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
             if (!commandKeys[slot].empty()) {
@@ -2142,7 +2325,9 @@ private:
     gamedata::TerrainDatabase terrainDatabase_;
     gamedata::VeterancyDatabase veterancy_;
     gamedata::UiLayoutDatabase ui_;
+    gamedata::LocalizationDatabase localization_;
     westwood::Palette palette_;
+    westwood::Palette sidebarPalette_;
     westwood::ShpTsDocument sprite_;
     std::unique_ptr<simulation::Simulation> simulation_;
     editor::TerrainMap terrainMap_{64, 64};
@@ -2157,6 +2342,8 @@ private:
     std::wstring assetError_;
     std::wstring toast_;
     std::filesystem::path contentRoot_;
+    std::optional<WorldCoord> targetIndicator_;
+    Color targetIndicatorColor_{0.18F, 1.0F, 0.34F, 1.0F};
     PerformanceTracker performance_;
     AppMode mode_ = AppMode::MainMenu;
     EditorTool editorTool_ = EditorTool::Unit;
@@ -2174,12 +2361,16 @@ private:
     bool sandboxPaletteDragging_ = false;
     bool brushPopupVisible_ = false;
     bool directionTestMode_ = false;
+    bool settingsVisible_ = false;
     int activeTab_ = 0;
     int directionTestIndex_ = 0;
     int pressedMenuButton_ = -1;
     int hoveredMenuButton_ = -1;
     float toastTime_ = 0.0F;
     float directionTestTime_ = 0.0F;
+    float targetIndicatorTime_ = 0.0F;
+    float volume_ = 1.0F;
+    std::string language_ = "zh_cn";
     ScreenCoord mouse_{};
     ScreenCoord dragStart_{};
     ScreenCoord dragEnd_{};

@@ -60,10 +60,11 @@ The runtime reads its own `INI/Rules.ini`, `INI/Art.ini`, `assets/game/ra2/infan
 - Single selection, drag selection, empty-click deselect, right-click commands and keyboard commands.
 - Selection markers are projected from a world-ground circle into isometric ellipses. `SelectionRadius` is read from the unit Definition; selected markers are solid and hover/drag candidates are dashed.
 - Infantry occupancy is simulation state: each ground cell has `TopCenter`, `BottomLeft` and `BottomRight` subcells. An explicit `OccupancyProfile=Infantry` limits a destination cell to three units and searches nearby cells for additional units.
-- 3x5 command card with only Move, Stop, Hold, Patrol and Attack Move in the first row; the second and third rows are reserved.
+- 3x5 command card with Move, Stop, Hold, Patrol and Attack Move in the first row; the second row starts with the K-bound Force Attack action and the remaining cells stay reserved.
 - Left collapsible strategic ability rail with empty slots and right two-tier production sidebar shell with disabled empty producer selectors.
 - `INI/UI.ini` drives the RA2/YR skin image IDs, logical rects, parent-relative widget anchors and shared command-card/sandbox hit boxes. Formal HUD and Sandbox shells use independent theme image IDs including `ui.hud.background`, `ui.hud.minimap.background`, unified `ui.hud.unitstatus.background`, `ui.hud.portrait.background`, `ui.hud.commandcard.background`, `ui.hud.production.background`, `ui.hud.strategic.background`, `ui.editor.sandbox.background` and dedicated editor control skins; rendering and input consume the same layout data, so a MOD can replace a panel image or move its rect without C++ changes.
 - Data-driven E2 VoiceSets load multiple original RA2/YR Select, Move and Attack samples, choose randomly without immediate repetition, and retain procedural cues only as fallback/debug audio.
+- `assets/ui/locales/en_us.json` and `zh_cn.json` provide the runtime UIName/string layer; the main-menu Settings panel can switch language and adjust master volume without changing Rules.ini.
 - Command acknowledgements use a dedicated voice stream and latest-intent queue policy; repeated simulation weapon events are a separate silent-until-sample `WeaponFire` path.
 
 ## Not implemented in this slice

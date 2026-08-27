@@ -202,6 +202,7 @@ enum class CommandKind : std::uint8_t {
     Patrol,
     AttackMove,
     Attack,
+    ForceAttack,
 };
 
 struct Command {

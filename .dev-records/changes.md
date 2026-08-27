@@ -189,3 +189,29 @@
 
 ### 风险
 - 高密度单位的血条和精灵仍可能在人工视觉验收中显得拥挤；本轮通过真实 Infantry occupancy subcell 和压力截图验证了不使用相同坐标重叠，但未扩展为完整编队渲染工具。
+
+## 2026-08-28 - UI 视觉收口、强制攻击与 JSON 本地化
+
+### 变更
+
+- 将底部 HUD 改为小地图、矮单位信息区、2:3 头像区和右下角高 Command Card 的左右锚定布局；正式 Command Card 不绘制标题，15 个按钮继续由 `INI/UI.ini` 的固定方形 rect 同时驱动绘制和命中测试。
+- 将测试地图保持为水泥色，并把静态等距单元边线加粗为黑色；生产栏缩窄为两列产品槽，分类图标改用 RA2/YR `sidec01/tab00`–`tab03` SHP 与匹配的 `sidebar.pal`。
+- 为单位信息字段统一缩小并居中；悬浮信息层先绘制不透明底和边框，避免覆盖底层文字。
+- 新增 `ForceAttack` 命令与 K/第二行第一格入口，支持以地面点或任意单位作为强制攻击目标，并显示绿色移动线/红色攻击线及目标十字标记。
+- 新增无第三方 JSON 依赖的扁平 locale 数据库、`assets/ui/locales/en_us.json` 与 `zh_cn.json`；Rules/Terrain 中的项目 UIName 已移除，运行时显示名由 locale 覆盖。主菜单 Settings 提供语言和音量调整。
+
+### 资产与边界
+
+- 只新增了四个生产分类小 SHP 和一个 sidebar 调色板；未引入第二单位、生产实体、AI、Trigger 或资源系统。
+- 保留工作区已有的用户资料目录与 `rulesmd.ini` 未跟踪文件，不加入本轮提交。
+
+### 验证待执行
+
+- 本轮改动尚未完成 MSVC configure/build、CTest 与 EXE 截图复核；这些验证必须在提交前执行，截图只作为运行证据，不替代人工视觉验收。
+
+### 最终验证补充
+
+- 已重新执行 `tools/dev/setup.ps1`、`tools/dev/build.ps1` 和 `tools/dev/test.ps1`；CMake configure/generate、MSVC x64 compile/link 与 CTest `1/1 PASS`。
+- 已实际启动最新 `ra2yr_client.exe`；日志确认 SDL/D3D11、Rules/Art、CONS.SHP、unittem.pal、生产分类 SHP/调色板和 E2 三组 VoiceSet 均成功加载。
+- 修正 D3D viewport 使用交换链像素尺寸，补齐 DIRT 中文 locale、加强水泥格黑边、收紧生产两列布局，并将初始镜头对准现有四个演示单位。
+- 运行截图保留在被忽略的 `artifacts/round7-validation/`；截图和自动运行证据不替代用户人工视觉/交互验收。

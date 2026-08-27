@@ -183,7 +183,7 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
     const CommandKind orderKind = entity.order.kind;
     Entity* target = nullptr;
     bool mayChaseTarget = false;
-    if (orderKind == CommandKind::Attack) {
+    if (orderKind == CommandKind::Attack || orderKind == CommandKind::ForceAttack) {
         target = find(entity.order.target);
         mayChaseTarget = true;
     } else if (orderKind == CommandKind::AttackMove) {
@@ -271,6 +271,33 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
             // the original click cell on the next simulation tick.
             entity.order = {};
             entity.patrolPoint.reset();
+        }
+    }
+
+    // Force attack also accepts a ground point.  With no entity target the
+    // unit advances to the requested point and emits the same attack event,
+    // while an entity target is allowed regardless of owner.
+    if (orderKind == CommandKind::ForceAttack && target == nullptr) {
+        const WorldCoord attackPoint = toWorld(entity.order.destination);
+        const float targetDistance = distance(entity.position, attackPoint);
+        if (targetDistance > entity.weaponRange) {
+            const float dx = attackPoint.x - entity.position.x;
+            const float dy = attackPoint.y - entity.position.y;
+            const float length = std::sqrt(dx * dx + dy * dy);
+            if (length > 0.001F) {
+                const float step = static_cast<float>(entity.speed) * seconds * 0.55F;
+                setFacing(entity, dx, dy);
+                entity.position.x += dx / length * std::min(step, length);
+                entity.position.y += dy / length * std::min(step, length);
+                moving = true;
+            }
+        } else {
+            attacking = true;
+            setFacing(entity, attackPoint.x - entity.position.x, attackPoint.y - entity.position.y);
+            if (entity.weaponCooldown <= 0.0F) {
+                entity.weaponCooldown = 25.0F / 30.0F;
+                ++entity.attackEvent;
+            }
         }
     }
 
@@ -504,6 +531,10 @@ void Simulation::issueAttackMove(GridCoord destination) {
 
 void Simulation::issueAttack(std::uint32_t target) {
     applyToSelected({CommandKind::Attack, {}, target}, true);
+}
+
+void Simulation::issueForceAttack(GridCoord destination, std::uint32_t target) {
+    applyToSelected({CommandKind::ForceAttack, destination, target}, true);
 }
 
 bool Simulation::eraseEntity(std::uint32_t id) {

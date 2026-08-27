@@ -1,6 +1,7 @@
 #include "GameData/Art.h"
 #include "Engine/Core/Utf.h"
 #include "GameData/Rules.h"
+#include "GameData/Localization.h"
 #include "GameData/Terrain.h"
 #include "GameData/UI.h"
 #include "GameData/Veterancy.h"
@@ -77,9 +78,17 @@ Inviso=yes
     assert(rules.e2().voiceSelect == "E2Select" && rules.e2().voiceMove == "E2Move" &&
         rules.e2().voiceAttack == "E2Attack");
     assert(rules.e2().primary.projectile == "InvisibleLow");
-    assert(rules.e2().name == "动员兵");
-    assert(rules.e2().secondaryName == "苏联步兵");
-    assert(rules.e2().weapons.size() == 1 && rules.e2().weapons.front().uiName == "M1卡宾枪");
+    assert(rules.e2().name == "Conscript");
+    assert(rules.e2().secondaryName.empty());
+    assert(rules.e2().weapons.size() == 1 && rules.e2().weapons.front().uiName == "M1Carbine");
+
+    gamedata::LocalizationDatabase chinese;
+    gamedata::LocalizationDatabase english;
+    assert(chinese.load(contentRoot / "assets/ui/locales/zh_cn.json", error));
+    assert(english.load(contentRoot / "assets/ui/locales/en_us.json", error));
+    assert(chinese.get("unit.E2.name") == "动员兵");
+    assert(english.get("unit.E2.name") == "CONSCRIPT");
+    assert(chinese.get("force_attack") == "强制攻击");
 
     gamedata::TerrainDatabase terrainDatabase;
     assert(terrainDatabase.load(contentRoot / "INI/Terrain.ini", error));
@@ -573,7 +582,7 @@ Inviso=yes
     statusDefinition.weapons = {statusDefinition.primary, statusDefinition.primary, statusDefinition.primary};
     const client::hud::UnitStatusViewModel status = client::hud::UnitStatusViewModelBuilder::build(
         statusEntity, statusDefinition, rules, veterancy, {});
-    assert(status.displayName == "动员兵" && status.healthBand == client::hud::HealthBand::Critical);
+    assert(status.displayName == "Conscript" && status.healthBand == client::hud::HealthBand::Critical);
     assert(status.shields.size() == 2 && status.energy == 4 && status.kills == 2);
     assert(status.weapons.size() == 3 && status.tags.size() == 3);
     assert(client::hud::UnitStatusViewModelBuilder::tooltip(status.weapons.front()).find(L"伤害：") !=
@@ -651,6 +660,23 @@ Inviso=yes
     returnFireSimulation.update(1.0F);
     assert(returnFireSimulation.find(returnRed)->recentAttacker == returnBlue);
     assert(returnFireSimulation.find(returnBlue)->health < returnBlueHealth);
+
+    simulation::Simulation forceAttackSimulation(animationDefinition);
+    const std::uint32_t forceAttacker = forceAttackSimulation.spawn(
+        behaviorDefinition, Owner::Red, {0, 0});
+    const std::uint32_t forceFriendlyTarget = forceAttackSimulation.spawn(
+        behaviorDefinition, Owner::Red, {2, 0});
+    forceAttackSimulation.selectEntity(forceAttacker);
+    const int friendlyHealth = forceAttackSimulation.find(forceFriendlyTarget)->health;
+    forceAttackSimulation.issueForceAttack({2, 0}, forceFriendlyTarget);
+    forceAttackSimulation.update(1.0F / 30.0F);
+    assert(forceAttackSimulation.find(forceFriendlyTarget)->health < friendlyHealth);
+
+    forceAttackSimulation.selectEntity(forceAttacker);
+    const std::uint32_t attackEventBefore = forceAttackSimulation.find(forceAttacker)->attackEvent;
+    forceAttackSimulation.issueForceAttack({1, 0});
+    forceAttackSimulation.update(1.0F);
+    assert(forceAttackSimulation.find(forceAttacker)->attackEvent > attackEventBefore);
 
     std::cout << "ra2yr core tests passed\n";
     return 0;

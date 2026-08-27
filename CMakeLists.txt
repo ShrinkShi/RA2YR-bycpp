@@ -30,6 +30,8 @@ add_library(ra2yr_core
     src/GameData/Art.h
     src/GameData/Rules.cpp
     src/GameData/Rules.h
+    src/GameData/Localization.cpp
+    src/GameData/Localization.h
     src/GameData/Terrain.cpp
     src/GameData/Terrain.h
     src/GameData/UI.cpp

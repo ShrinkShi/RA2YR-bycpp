@@ -227,3 +227,17 @@
 
 ### 后续事项
 - 等待用户对本轮运行截图进行最终视觉/交互验收；不把自动化运行证据表述为人工验收通过。
+
+## 2026-08-28 - UI 收口与本地化
+
+- 重新 fetch 并确认 PR #2 分支远端 HEAD 为 `214d30c852bdbd46cbe28cd101c9f950f71624be`，`origin/main` 为 `1c077e44399721d7f567993d422c7b507504f90c`。
+- 提取用户本机 RA2 资源包中的 `sidec01/tab00`–`tab03` 与 `sidebar.pal`，替换生产分类栏的错误建筑整图，并缩窄生产栏、保持两列产品槽。
+- 重排异形底部 HUD，强化水泥测试格黑边，修正单位信息字体/居中和不透明悬浮层。
+- 新增 ForceAttack/K 与地面/单位目标指示线；新增 locale JSON 运行时加载和 Settings 语言/音量 UI；移除项目 Rules/Terrain 的内嵌 UIName。
+- 下一步执行干净 configure、MSVC build/link、CTest、EXE 启动与运行截图，再审查 diff 后提交并推送 PR #2，保持 Draft。
+
+## 2026-08-28 - 最终运行复核与提交前收口
+
+- 修复高 DPI/最大化窗口的 D3D viewport 像素尺寸适配；收紧生产栏两列产品格，强化水泥测试格黑色单元边界，并把初始镜头对准现有四个演示单位。
+- 补齐 `terrain.DIRT.name` 双语 locale；确认沙盒显示不再出现 `DIRT` 英文。
+- 重新完成 configure、MSVC build/link、CTest 与实际 EXE 启动；记录主菜单、Editor Sandbox、F3 Debug Overlay 运行截图，保留人工复核但不宣称人工验收通过。

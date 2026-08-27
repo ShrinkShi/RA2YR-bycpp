@@ -93,6 +93,7 @@ public:
     void issuePatrol(GridCoord destination);
     void issueAttackMove(GridCoord destination);
     void issueAttack(std::uint32_t target);
+    void issueForceAttack(GridCoord destination, std::uint32_t target = 0);
     bool eraseEntity(std::uint32_t id);
 
     [[nodiscard]] const std::vector<Entity>& entities() const { return entities_; }

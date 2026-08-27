@@ -111,7 +111,7 @@ void appendStaticDiamond(std::vector<D3D11Renderer::Vertex>& vertices, float lef
         }
         // Keep the sandbox cell boundary readable at the current test zoom;
         // this is a world-space edge, so it scales with the camera like the tile.
-        constexpr float kWorldThickness = 2.0F;
+        constexpr float kWorldThickness = 4.0F;
         const float nx = -dy / length * kWorldThickness * 0.5F;
         const float ny = dx / length * kWorldThickness * 0.5F;
         const ScreenCoord a{start.x + nx, start.y + ny};
@@ -410,6 +410,8 @@ void D3D11Renderer::resize() {
     renderTarget_.Reset();
     d2dTarget_.Reset();
     swapChain_->ResizeBuffers(0, static_cast<UINT>(pixelWidth_), static_cast<UINT>(pixelHeight_), DXGI_FORMAT_UNKNOWN, 0);
+    std::cerr << "[Renderer] Resize logical=" << viewportWidth_ << "x" << viewportHeight_
+        << " pixels=" << pixelWidth_ << "x" << pixelHeight_ << '\n';
     std::string ignored;
     createBackBuffer(ignored);
 }
@@ -520,10 +522,10 @@ void D3D11Renderer::setWorldCamera(WorldCoord worldCenter, float zoom, ScreenCoo
 void D3D11Renderer::beginFrame() {
     const float clearColor[] = {0.005F, 0.006F, 0.008F, 1.0F};
     context_->OMSetRenderTargets(1, renderTarget_.GetAddressOf(), nullptr);
-    // SDL reports the logical client size used by the input transform and by
-    // the 1920x1080 UI coordinate space. Keep the rasterizer and text target
-    // on that same virtual canvas; the swap chain handles the DPI pixel size.
-    D3D11_VIEWPORT viewport{0.0F, 0.0F, static_cast<float>(viewportWidth_), static_cast<float>(viewportHeight_), 0.0F, 1.0F};
+    // Geometry and input use the fixed 1920x1080 logical canvas, but the D3D
+    // viewport is always the swap-chain's pixel size. Using SDL's logical
+    // dimensions here clips the bottom HUD on high-DPI or maximized windows.
+    D3D11_VIEWPORT viewport{0.0F, 0.0F, static_cast<float>(pixelWidth_), static_cast<float>(pixelHeight_), 0.0F, 1.0F};
     context_->RSSetViewports(1, &viewport);
     context_->ClearRenderTargetView(renderTarget_.Get(), clearColor);
     solidVertices_.clear();
@@ -840,7 +842,7 @@ void D3D11Renderer::flushText() {
     context_->Flush();
     d2dTarget_->BeginDraw();
     d2dTarget_->SetTransform(D2D1::Matrix3x2F::Scale(
-        static_cast<float>(viewportWidth_) / logicalWidth_, static_cast<float>(viewportHeight_) / logicalHeight_));
+        static_cast<float>(pixelWidth_) / logicalWidth_, static_cast<float>(pixelHeight_) / logicalHeight_));
     for (const TextItem& item : textItems_) {
         IDWriteTextLayout* layout = textLayout(item);
         if (layout == nullptr) {
