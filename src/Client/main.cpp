@@ -1,5 +1,6 @@
 #include "GameData/Rules.h"
 #include "GameData/Art.h"
+#include "GameData/UI.h"
 #include "Renderer/D3D11Renderer.h"
 #include "Simulation/Simulation.h"
 #include "Westwood/Ini/Ini.h"
@@ -22,6 +23,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <random>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -41,10 +43,11 @@ struct RenderScaleConfig {
     float hudPortraitScale;
 };
 
-constexpr RenderScaleConfig kRenderScale{1.0F, 1.65F, 1.10F, 1.20F};
+// Keep the world grid readable enough for the three infantry subcells. UI
+// coordinates remain on the independent 1920x1080 logical canvas.
+constexpr RenderScaleConfig kRenderScale{1.35F, 1.65F, 1.10F, 1.20F};
 constexpr float kTileWidth = 44.0F * kRenderScale.worldRenderScale;
 constexpr float kTileHeight = 22.0F * kRenderScale.worldRenderScale;
-constexpr Rect kWorldViewport{100.0F, 50.0F, 1390.0F, 780.0F};
 constexpr float kCameraEdgeThreshold = 22.0F;
 constexpr float kCameraPanPixelsPerSecond = 420.0F;
 
@@ -112,6 +115,13 @@ enum class AudioCue {
 };
 
 class AudioService {
+    struct VoiceSet {
+        std::vector<std::string> names;
+        std::vector<std::vector<float>> samples;
+        bool noImmediateRepeat = true;
+        int lastSampleIndex = -1;
+    };
+
 public:
     ~AudioService() { shutdown(); }
 
@@ -132,29 +142,47 @@ public:
         return true;
     }
 
-    bool loadVoiceSet(const std::filesystem::path& configPath, std::string& error) {
+    bool loadVoiceSet(const std::filesystem::path& configPath,
+        const std::array<std::pair<AudioCue, std::string>, 3>& bindings, std::string& error) {
         westwood::IniDocument config;
         if (!config.load(configPath, error)) {
             return false;
         }
-        const std::pair<AudioCue, std::string_view> voices[] = {
-            {AudioCue::VoiceSelect, "VoiceSelect"},
-            {AudioCue::VoiceMoveAcknowledgement, "VoiceMoveAcknowledgement"},
-            {AudioCue::VoiceAttackAcknowledgement, "VoiceAttackAcknowledgement"},
-        };
-        for (const auto& [cue, section] : voices) {
-            const std::string file = config.get(section, "File");
-            if (file.empty()) {
-                error = "Missing audio File in [" + std::string(section) + "]";
+        for (const auto& [cue, section] : bindings) {
+            std::vector<std::string> files;
+            std::stringstream fileList(config.get(section, "Files"));
+            std::string file;
+            while (std::getline(fileList, file, ',')) {
+                const auto first = file.find_first_not_of(" \t\r\n");
+                const auto last = file.find_last_not_of(" \t\r\n");
+                if (first != std::string::npos) {
+                    files.push_back(file.substr(first, last - first + 1));
+                }
+            }
+            if (files.empty()) {
+                const std::string legacyFile = config.get(section, "File");
+                if (!legacyFile.empty()) {
+                    files.push_back(legacyFile);
+                }
+            }
+            if (files.empty()) {
+                error = "Missing audio Files in [" + section + "]";
                 return false;
             }
-            std::vector<float> samples;
-            const std::filesystem::path audioPath = configPath.parent_path() / file;
-            if (!decodeWav(audioPath, samples, error)) {
-                return false;
+            VoiceSet set;
+            set.noImmediateRepeat = config.getBool(section, "NoImmediateRepeat", true);
+            for (const std::string& fileName : files) {
+                std::vector<float> samples;
+                const std::filesystem::path audioPath = configPath.parent_path() / fileName;
+                if (!decodeWav(audioPath, samples, error)) {
+                    return false;
+                }
+                set.names.push_back(fileName);
+                set.samples.push_back(std::move(samples));
+                std::cerr << "[Audio] Loaded voice sample " << section << ": " << audioPath.string() << '\n';
             }
-            voiceSamples_[cue] = std::move(samples);
-            std::cerr << "[Audio] Loaded voice " << section << ": " << audioPath.string() << '\n';
+            voiceSamples_[cue] = std::move(set);
+            std::cerr << "[Audio] VoiceSet " << section << " loaded with " << files.size() << " samples\n";
         }
         return true;
     }
@@ -204,9 +232,19 @@ private:
         // the previous sample prevents stale voice commands from piling up.
         SDL_ClearAudioStream(voiceStream_);
         const auto voice = voiceSamples_.find(cue);
-        if (voice != voiceSamples_.end() && !voice->second.empty()) {
-            if (!SDL_PutAudioStreamData(voiceStream_, voice->second.data(),
-                static_cast<int>(voice->second.size() * sizeof(float)))) {
+        if (voice != voiceSamples_.end() && !voice->second.samples.empty()) {
+            VoiceSet& set = voice->second;
+            std::uniform_int_distribution<std::size_t> distribution(0, set.samples.size() - 1U);
+            std::size_t sampleIndex = distribution(random_);
+            if (set.noImmediateRepeat && set.samples.size() > 1U &&
+                static_cast<int>(sampleIndex) == set.lastSampleIndex) {
+                sampleIndex = (sampleIndex + 1U) % set.samples.size();
+            }
+            set.lastSampleIndex = static_cast<int>(sampleIndex);
+            lastVoiceSample_ = set.names[sampleIndex];
+            std::cerr << "[Audio] Playing " << cueName(cue) << " sample " << lastVoiceSample_ << '\n';
+            if (!SDL_PutAudioStreamData(voiceStream_, set.samples[sampleIndex].data(),
+                static_cast<int>(set.samples[sampleIndex].size() * sizeof(float)))) {
                 std::cerr << "[Audio] Voice queue failed: " << SDL_GetError() << '\n';
             }
             return;
@@ -332,9 +370,11 @@ private:
 
     SDL_AudioStream* voiceStream_ = nullptr;
     SDL_AudioStream* sfxStream_ = nullptr;
-    std::unordered_map<AudioCue, std::vector<float>> voiceSamples_;
+    std::unordered_map<AudioCue, VoiceSet> voiceSamples_;
+    std::mt19937 random_{std::random_device{}()};
     std::uint32_t voiceAckCount_ = 0;
     std::string lastVoiceEvent_;
+    std::string lastVoiceSample_;
 };
 
 std::wstring utf8ToWide(const std::string& value) {
@@ -368,19 +408,29 @@ public:
         if (!renderer_.initialize(window_, error)) {
             return false;
         }
+        contentRoot_ = executableDirectory();
+        if (!ui_.load(contentRoot_ / "INI/UI.ini", error)) {
+            return false;
+        }
+        initializeUiLayout();
         camera_.projection.tileWidth = kTileWidth;
         camera_.projection.tileHeight = kTileHeight;
-        camera_.viewportCenter = {kWorldViewport.x + kWorldViewport.width * 0.5F,
-            kWorldViewport.y + kWorldViewport.height * 0.5F};
+        const Rect viewport = worldViewport();
+        camera_.viewportCenter = {viewport.x + viewport.width * 0.5F,
+            viewport.y + viewport.height * 0.5F};
         camera_.worldCenter = {0.0F, 0.0F};
-        contentRoot_ = executableDirectory();
-        std::string audioError;
-        if (!audio_.loadVoiceSet(contentRoot_ / "assets/audio/voices.ini", audioError)) {
-            std::cerr << "[Audio] Voice set unavailable; using procedural fallback: " << audioError << '\n';
-        }
         loadStrings();
         if (!loadRuntimeAssets(error)) {
             return false;
+        }
+        std::string audioError;
+        const std::array<std::pair<AudioCue, std::string>, 3> voiceBindings = {
+            std::pair{AudioCue::VoiceSelect, rules_.e2().voiceSelect},
+            std::pair{AudioCue::VoiceMoveAcknowledgement, rules_.e2().voiceMove},
+            std::pair{AudioCue::VoiceAttackAcknowledgement, rules_.e2().voiceAttack},
+        };
+        if (!audio_.loadVoiceSet(contentRoot_ / "assets/audio/voices.ini", voiceBindings, audioError)) {
+            std::cerr << "[Audio] Voice set unavailable; using procedural fallback: " << audioError << '\n';
         }
         if (!buildTerrain(error)) {
             return false;
@@ -459,6 +509,26 @@ private:
         return std::filesystem::path(utf8ToWide(basePath));
     }
 
+    Rect worldViewport() const {
+        return ui_.rect("world.viewport");
+    }
+
+    void initializeUiLayout() {
+        const std::pair<std::string, std::string> menuDefinitions[] = {
+            {"campaign", "main.menu.campaign"}, {"load", "main.menu.load"},
+            {"skirmish", "main.menu.skirmish"}, {"online", "main.menu.online"},
+            {"lan", "main.menu.lan"}, {"settings", "main.menu.settings"},
+            {"statistics", "main.menu.statistics"}, {"editor", "main.menu.editor"},
+            {"exit", "main.menu.exit"},
+        };
+        menuButtons_.clear();
+        for (const auto& [key, rectKey] : menuDefinitions) {
+            menuButtons_.push_back({key, "ui.main.button", "ui.main.button_hover", ui_.rect(rectKey)});
+        }
+        const Rect sandbox = ui_.rect("sandbox.window");
+        sandboxPalettePosition_ = {sandbox.x, sandbox.y};
+    }
+
     void loadStrings() {
         strings_ = {
             {"title", L"COMMAND & CONQUER"}, {"subtitle", L"YURI'S REVENGE"},
@@ -466,7 +536,6 @@ private:
             {"online", L"ONLINE"}, {"lan", L"LAN"}, {"settings", L"SETTINGS"},
             {"statistics", L"STATISTICS"}, {"editor", L"MAP EDITOR"}, {"exit", L"EXIT GAME"},
             {"unimplemented", L"NOT IMPLEMENTED"}, {"editor_title", L"EDITOR SANDBOX"},
-            {"editor_hint", L"左键选择 / 拖框选择   右键移动或攻击   M 移动  S 停止  H 原地不动  P 巡逻  A 攻击移动"},
             {"red", L"RED"}, {"blue", L"BLUE"}, {"place_red", L"PLACE RED E2"}, {"place_blue", L"PLACE BLUE E2"},
             {"cancel_place", L"CANCEL PLACEMENT"}, {"strategic", L"战略能力"}, {"production", L"生产栏"},
             {"building", L"BUILDING"}, {"defense", L"DEFENSE"}, {"infantry", L"INFANTRY"}, {"vehicles", L"VEHICLES"},
@@ -480,7 +549,7 @@ private:
              {"terrain", L"Terrain"}, {"unit", L"Unit"}, {"object", L"对象"}, {"mode", L"模式"},
              {"select", L"选择"}, {"place", L"放置"}, {"collapse", L"收起"}, {"expand", L"展开"},
              {"sandbox_palette", L"沙盒工具"}, {"category", L"类别"}, {"current_object", L"当前对象"},
-             {"faction_owner", L"所属"}, {"disabled", L"不可用"}, {"palette_hint", L"F2 显示/隐藏工具窗"},
+             {"faction_owner", L"所属"}, {"disabled", L"不可用"}, {"command_card", L"命令面板"},
              {"animation_idle", L"待机"}, {"animation_walk", L"行走"}, {"animation_attack", L"攻击"},
             {"animation_death", L"死亡"},
             {"runtime", L"SIMULATION ONLINE"}, {"asset_missing", L"RUNTIME ASSETS NOT FOUND"},
@@ -510,18 +579,17 @@ private:
             std::cerr << "[Content][Error] " << error << '\n';
             return false;
         }
-        const std::pair<std::string, std::filesystem::path> images[] = {
-            {"ui.main.background", contentRoot_ / "assets/ui/ra2/mainmenu/crt_console.png"},
-            {"ui.main.button", contentRoot_ / "assets/ui/ra2/mainmenu/button.png"},
-            {"ui.main.button_hover", contentRoot_ / "assets/ui/ra2/mainmenu/button_hover.png"},
-            {"ui.hud.leftbar", contentRoot_ / "assets/ui/dta/hud/leftbar.png"},
-            {"ui.hud.rightbar", contentRoot_ / "assets/ui/dta/hud/rightbar.png"},
-            {"ui.hud.button", contentRoot_ / "assets/ui/dta/hud/160pxbtn.png"},
-            {"ui.hud.button_hover", contentRoot_ / "assets/ui/dta/hud/160pxbtn_c.png"},
-            {"ui.hud.tab", contentRoot_ / "assets/ui/dta/hud/133pxtab.png"},
-            {"ui.hud.tab_hover", contentRoot_ / "assets/ui/dta/hud/133pxtab_c.png"},
+        const std::string imageIds[] = {
+            "ui.main.background", "ui.main.button", "ui.main.button_hover", "ui.hud.leftbar",
+            "ui.hud.rightbar", "ui.hud.button", "ui.hud.button_hover", "ui.hud.tab", "ui.hud.tab_hover",
         };
-        for (const auto& [id, path] : images) {
+        for (const std::string& id : imageIds) {
+            const std::filesystem::path path = ui_.imagePath(id, contentRoot_);
+            if (path.empty()) {
+                error = "UI.ini has no image path for " + id;
+                assetError_ = utf8ToWide(error);
+                return false;
+            }
             if (!renderer_.loadTexture(id, path, error)) {
                 assetError_ = utf8ToWide(error);
                 std::cerr << "[Content][Error] " << error << '\n';
@@ -576,7 +644,7 @@ private:
     }
 
     bool inWorld(ScreenCoord position) const {
-        return kWorldViewport.contains(position.x, position.y);
+        return worldViewport().contains(position.x, position.y);
     }
 
     Rect selectionRect() const {
@@ -596,19 +664,20 @@ private:
     }
 
     void updateCamera(float seconds) {
+        const Rect viewport = worldViewport();
         if (!inWorld(mouse_) || dragging_ || sandboxPaletteDragging_ ||
             (sandboxPaletteVisible_ && sandboxPaletteRect().contains(mouse_.x, mouse_.y))) {
             return;
         }
         ScreenCoord delta{};
-        if (mouse_.x <= kWorldViewport.x + kCameraEdgeThreshold) {
+        if (mouse_.x <= viewport.x + kCameraEdgeThreshold) {
             delta.x -= kCameraPanPixelsPerSecond * seconds;
-        } else if (mouse_.x >= kWorldViewport.x + kWorldViewport.width - kCameraEdgeThreshold) {
+        } else if (mouse_.x >= viewport.x + viewport.width - kCameraEdgeThreshold) {
             delta.x += kCameraPanPixelsPerSecond * seconds;
         }
-        if (mouse_.y <= kWorldViewport.y + kCameraEdgeThreshold) {
+        if (mouse_.y <= viewport.y + kCameraEdgeThreshold) {
             delta.y -= kCameraPanPixelsPerSecond * seconds;
-        } else if (mouse_.y >= kWorldViewport.y + kWorldViewport.height - kCameraEdgeThreshold) {
+        } else if (mouse_.y >= viewport.y + viewport.height - kCameraEdgeThreshold) {
             delta.y += kCameraPanPixelsPerSecond * seconds;
         }
         if (std::abs(delta.x) > 0.0F || std::abs(delta.y) > 0.0F) {
@@ -886,29 +955,35 @@ private:
     }
 
     Rect sandboxPaletteRect() const {
-        return {sandboxPalettePosition_.x, sandboxPalettePosition_.y, 300.0F,
-            sandboxPaletteCollapsed_ ? 42.0F : 328.0F};
+        const Rect configured = ui_.rect("sandbox.window");
+        const Rect titleBar = ui_.relativeRect("sandbox.title_bar");
+        return {sandboxPalettePosition_.x, sandboxPalettePosition_.y, configured.width,
+            sandboxPaletteCollapsed_ ? titleBar.height : configured.height};
     }
 
     SandboxPaletteLayout sandboxPaletteLayout() const {
         const Rect palette = sandboxPaletteRect();
         SandboxPaletteLayout layout;
         layout.window = palette;
-        layout.titleBar = {palette.x, palette.y, palette.width, 42.0F};
-        layout.collapseButton = {palette.x + palette.width - 76.0F, palette.y + 7.0F, 30.0F, 28.0F};
-        layout.closeButton = {palette.x + palette.width - 38.0F, palette.y + 7.0F, 30.0F, 28.0F};
-        layout.categoryLabel = {palette.x + 16.0F, palette.y + 48.0F, 100.0F, 22.0F};
-        layout.terrainButton = {palette.x + 16.0F, palette.y + 74.0F, 126.0F, 38.0F};
-        layout.unitButton = {palette.x + 158.0F, palette.y + 74.0F, 126.0F, 38.0F};
-        layout.buildingButton = {palette.x + 16.0F, palette.y + 122.0F, 126.0F, 38.0F};
-        layout.resourceButton = {palette.x + 158.0F, palette.y + 122.0F, 126.0F, 38.0F};
-        layout.objectLabel = {palette.x + 16.0F, palette.y + 166.0F, 268.0F, 26.0F};
-        layout.ownerLabel = {palette.x + 16.0F, palette.y + 202.0F, 80.0F, 22.0F};
-        layout.redButton = {palette.x + 16.0F, palette.y + 222.0F, 126.0F, 38.0F};
-        layout.blueButton = {palette.x + 158.0F, palette.y + 222.0F, 126.0F, 38.0F};
-        layout.modeLabel = {palette.x + 16.0F, palette.y + 270.0F, 80.0F, 22.0F};
-        layout.selectButton = {palette.x + 16.0F, palette.y + 286.0F, 126.0F, 34.0F};
-        layout.placeButton = {palette.x + 158.0F, palette.y + 286.0F, 126.0F, 34.0F};
+        const auto child = [this, palette](std::string_view key) {
+            const Rect relative = ui_.relativeRect(key);
+            return Rect{palette.x + relative.x, palette.y + relative.y, relative.width, relative.height};
+        };
+        layout.titleBar = child("sandbox.title_bar");
+        layout.collapseButton = child("sandbox.collapse");
+        layout.closeButton = child("sandbox.close");
+        layout.categoryLabel = child("sandbox.category");
+        layout.terrainButton = child("sandbox.terrain");
+        layout.unitButton = child("sandbox.unit");
+        layout.buildingButton = child("sandbox.building");
+        layout.resourceButton = child("sandbox.resource");
+        layout.objectLabel = child("sandbox.object");
+        layout.ownerLabel = child("sandbox.owner");
+        layout.redButton = child("sandbox.red");
+        layout.blueButton = child("sandbox.blue");
+        layout.modeLabel = child("sandbox.mode");
+        layout.selectButton = child("sandbox.select");
+        layout.placeButton = child("sandbox.place");
         return layout;
     }
 
@@ -961,29 +1036,34 @@ private:
         if (handleSandboxPaletteClick()) {
             return true;
         }
-        if (Rect{17.0F, 121.0F, 60.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+        if (ui_.rect("hud.strategic.collapse").contains(mouse_.x, mouse_.y)) {
             strategicCollapsed_ = !strategicCollapsed_;
             audio_.play(AudioCue::UIClick);
             return true;
         }
-        if (mouse_.y >= 108.0F && mouse_.y <= 150.0F && mouse_.x >= 1520.0F && mouse_.x < 1900.0F) {
-            activeTab_ = std::clamp(static_cast<int>((mouse_.x - 1520.0F) / 96.0F), 0, 3);
-            audio_.play(AudioCue::UIClick);
-            return true;
+        for (int index = 0; index < 4; ++index) {
+            if (ui_.rect("hud.production.tab." + std::to_string(index)).contains(mouse_.x, mouse_.y)) {
+                activeTab_ = index;
+                audio_.play(AudioCue::UIClick);
+                return true;
+            }
         }
-        if (mouse_.y >= 180.0F && mouse_.y <= 222.0F && mouse_.x >= 1520.0F && mouse_.x < 1894.0F) {
-            return true;
+        for (int index = 0; index < 3; ++index) {
+            if (ui_.rect("hud.production.producer." + std::to_string(index)).contains(mouse_.x, mouse_.y)) {
+                return true; // Producer slots are intentionally disabled until Simulation has entities for them.
+            }
         }
-        if (Rect{1820.0F, 8.0F, 90.0F, 40.0F}.contains(mouse_.x, mouse_.y)) {
+        if (ui_.rect("editor.menu").contains(mouse_.x, mouse_.y)) {
             mode_ = AppMode::MainMenu;
             return true;
         }
-        const Rect card{1518.0F, 850.0F, 382.0F, 188.0F};
+        const Rect card = ui_.rect("hud.command_card");
         if (card.contains(mouse_.x, mouse_.y)) {
-            const int column = static_cast<int>((mouse_.x - card.x) / 76.0F);
-            const int row = static_cast<int>((mouse_.y - 878.0F) / 52.0F);
-            if (column >= 0 && column < 5 && row >= 0 && row < 3) {
-                const int slot = row * 5 + column;
+            for (int slot = 0; slot < 15; ++slot) {
+                if (!ui_.childRect("hud.command_card", "hud.command_card.slot." + std::to_string(slot))
+                        .contains(mouse_.x, mouse_.y)) {
+                    continue;
+                }
                 if (slot == 0) {
                     pendingAction_ = PendingAction::Move;
                 } else if (slot == 1) {
@@ -1289,10 +1369,10 @@ private:
 
     void renderMainMenu() {
         renderer_.drawRect({0.0F, 0.0F, kLogicalWidth, kLogicalHeight}, {0.0F, 0.0F, 0.0F, 1.0F});
-        renderer_.drawImage("ui.main.background", {320.0F, 120.0F, 1280.0F, 824.0F});
-        renderer_.drawText(T("title"), {510.0F, 425.0F, 640.0F, 58.0F}, 36, {1.0F, 0.84F, 0.34F, 1.0F});
-        renderer_.drawText(T("subtitle"), {500.0F, 482.0F, 660.0F, 72.0F}, 50, {1.0F, 0.28F, 0.10F, 1.0F});
-        renderer_.drawText(L"RA2YR-BYCPP  //  MAIN CONTROL", {520.0F, 560.0F, 620.0F, 30.0F}, 16, {0.86F, 0.62F, 0.28F, 1.0F});
+        renderer_.drawImage("ui.main.background", ui_.rect("main.background"));
+        renderer_.drawText(T("title"), ui_.rect("main.title"), 36, {1.0F, 0.84F, 0.34F, 1.0F});
+        renderer_.drawText(T("subtitle"), ui_.rect("main.subtitle"), 50, {1.0F, 0.28F, 0.10F, 1.0F});
+        renderer_.drawText(L"RA2YR-BYCPP  //  MAIN CONTROL", ui_.rect("main.footer"), 16, {0.86F, 0.62F, 0.28F, 1.0F});
         for (std::size_t i = 0; i < menuButtons_.size(); ++i) {
             const MenuButton& button = menuButtons_[i];
             const bool hovered = button.rect.contains(mouse_.x, mouse_.y);
@@ -1313,7 +1393,7 @@ private:
 
     void renderMiniMap(Rect panel) {
         drawHudPanel(panel, T("minimap"));
-        const Rect field{panel.x + 14.0F, panel.y + 38.0F, panel.width - 28.0F, panel.height - 52.0F};
+        const Rect field = ui_.childRect("hud.minimap", "minimap.field");
         renderer_.drawRect(field, {0.025F, 0.10F, 0.065F, 1.0F});
         for (int index = 1; index < 8; ++index) {
             const float x = field.x + field.width * static_cast<float>(index) / 8.0F;
@@ -1332,15 +1412,16 @@ private:
             renderer_.drawRect({field.x + normalizedX * field.width - 4.0F,
                 field.y + normalizedY * field.height - 4.0F, 8.0F, 8.0F}, color);
         }
+        const Rect viewport = worldViewport();
         const ScreenCoord viewportCenter{
-            kWorldViewport.x + kWorldViewport.width * 0.5F,
-            kWorldViewport.y + kWorldViewport.height * 0.5F};
+            viewport.x + viewport.width * 0.5F,
+            viewport.y + viewport.height * 0.5F};
         const WorldCoord cameraCenter = camera_.toWorld(viewportCenter);
         const WorldCoord viewCorners[] = {
-            camera_.toWorld({kWorldViewport.x, kWorldViewport.y}),
-            camera_.toWorld({kWorldViewport.x + kWorldViewport.width, kWorldViewport.y}),
-            camera_.toWorld({kWorldViewport.x, kWorldViewport.y + kWorldViewport.height}),
-            camera_.toWorld({kWorldViewport.x + kWorldViewport.width, kWorldViewport.y + kWorldViewport.height}),
+            camera_.toWorld({viewport.x, viewport.y}),
+            camera_.toWorld({viewport.x + viewport.width, viewport.y}),
+            camera_.toWorld({viewport.x, viewport.y + viewport.height}),
+            camera_.toWorld({viewport.x + viewport.width, viewport.y + viewport.height}),
         };
         float minRelativeX = viewCorners[0].x - cameraCenter.x;
         float maxRelativeX = minRelativeX;
@@ -1411,16 +1492,37 @@ private:
         drawToolButton(layout.placeButton, T("place"), placing_);
     }
 
+    void drawGroundSelectionEllipse(WorldCoord center, float radius, Color color, bool dashed) {
+        constexpr int kSegments = 32;
+        constexpr float kPi = 3.14159265358979323846F;
+        for (int index = 0; index < kSegments; ++index) {
+            if (dashed && ((index / 2) % 2 == 1)) {
+                continue;
+            }
+            const float firstAngle = static_cast<float>(index) * 2.0F * kPi /
+                static_cast<float>(kSegments);
+            const float secondAngle = static_cast<float>(index + 1) * 2.0F * kPi /
+                static_cast<float>(kSegments);
+            const WorldCoord first{center.x + std::cos(firstAngle) * radius,
+                center.y + std::sin(firstAngle) * radius};
+            const WorldCoord second{center.x + std::cos(secondAngle) * radius,
+                center.y + std::sin(secondAngle) * radius};
+            renderer_.drawLine(gridToScreen(first), gridToScreen(second), color,
+                std::max(1.5F, 2.0F * camera_.zoom));
+        }
+    }
+
     void renderEditor() {
         renderer_.setWorldStats(terrainTileCount_, simulation_->entities().size());
         renderer_.setWorldCamera(camera_.worldCenter, camera_.zoom, camera_.viewportCenter,
             kTileWidth, kTileHeight);
         renderer_.drawRect({0.0F, 0.0F, kLogicalWidth, kLogicalHeight}, {0.008F, 0.012F, 0.018F, 1.0F});
-        const Rect world = kWorldViewport;
+        const Rect world = worldViewport();
         renderer_.drawRect(world, {0.04F, 0.07F, 0.05F, 1.0F});
         renderer_.drawStaticTerrain();
         renderer_.drawBorder(world, {0.65F, 0.48F, 0.18F, 1.0F}, 3.0F);
 
+        const std::uint32_t hoveredUnit = !dragging_ && inWorld(mouse_) ? unitAt(mouse_) : 0;
         for (const auto& entity : simulation_->entities()) {
             if (entity.health <= 0) {
                 continue;
@@ -1429,7 +1531,8 @@ private:
             const std::size_t frameIndex = static_cast<std::size_t>(art_.frameIndex(
                 rules_.e2().image, animationSequence(entity.animationState), entity.animationFrame,
                 entity.facing));
-            const bool previewed = dragging_ && selectionRect().contains(position.x, position.y);
+            const bool previewed = !entity.selected &&
+                ((hoveredUnit == entity.id) || (dragging_ && selectionRect().contains(position.x, position.y)));
             if (assetReady_) {
                 renderer_.drawSprite(rules_.e2().image, "unittem", frameIndex, entity.owner, position,
                     kRenderScale.unitVisualScale * camera_.zoom);
@@ -1437,11 +1540,12 @@ private:
             const Rect spriteBounds = renderer_.spriteBounds(rules_.e2().image, frameIndex, position,
                 kRenderScale.unitVisualScale * camera_.zoom);
             if (entity.selected || previewed) {
-                // Draw after the sprite so the ground marker remains visible
-                // at the same anchor used by the simulation and hit testing.
-                renderer_.drawCircle(position, 22.0F * camera_.zoom,
+                // The selection marker is a world-ground circle. Projection
+                // turns it into the correct isometric ellipse and keeps it
+                // locked to the sprite's ground anchor at every zoom.
+                drawGroundSelectionEllipse(entity.position, entity.selectionRadius,
                     entity.selected ? Color{1.0F, 0.84F, 0.20F, 1.0F} : Color{0.35F, 0.78F, 1.0F, 0.95F},
-                    2.0F * camera_.zoom, previewed && !entity.selected);
+                    previewed);
             }
             const float healthRatio = std::clamp(static_cast<float>(entity.health) /
                 static_cast<float>(entity.maxHealth), 0.0F, 1.0F);
@@ -1460,70 +1564,68 @@ private:
                 healthBarWidth * healthRatio, 4.0F * camera_.zoom}, healthColor);
         }
 
-        const Rect strategicRail{0.0F, 105.0F, 94.0F, 670.0F};
+        const Rect strategicRail = ui_.rect("hud.strategic.rail");
         renderer_.drawRect(strategicRail, {0.025F, 0.035F, 0.045F, 0.98F});
-        renderer_.drawImage("ui.hud.leftbar", {0.0F, 105.0F, 24.0F, 670.0F});
-        renderer_.drawImage("ui.hud.leftbar", {70.0F, 105.0F, 24.0F, 670.0F});
-        renderer_.drawBorder({8.0F, 114.0F, 78.0F, 650.0F}, {0.64F, 0.42F, 0.16F, 1.0F}, 2.0F);
-        const Rect collapseButton{17.0F, 121.0F, 60.0F, 38.0F};
+        renderer_.drawImage("ui.hud.leftbar", ui_.rect("hud.strategic.leftbar"));
+        renderer_.drawImage("ui.hud.leftbar", ui_.rect("hud.strategic.rightbar"));
+        renderer_.drawBorder(ui_.rect("hud.strategic.frame"), {0.64F, 0.42F, 0.16F, 1.0F}, 2.0F);
+        const Rect collapseButton = ui_.rect("hud.strategic.collapse");
         renderer_.drawImage("ui.hud.button", collapseButton);
         renderer_.drawText(strategicCollapsed_ ? T("expand") : T("collapse"), collapseButton, 12,
             {1.0F, 0.82F, 0.20F, 1.0F});
         if (!strategicCollapsed_) {
-            renderer_.drawText(T("strategic"), {12.0F, 164.0F, 70.0F, 34.0F}, 14,
+            renderer_.drawText(T("strategic"), ui_.rect("hud.strategic.title"), 14,
                 {1.0F, 0.82F, 0.20F, 1.0F});
             for (int index = 0; index < 5; ++index) {
-                const Rect ability{18.0F, 202.0F + index * 108.0F, 58.0F, 92.0F};
+                const Rect ability = ui_.rect("hud.strategic.slot." + std::to_string(index));
                 renderer_.drawImage("ui.hud.button", ability);
                 renderer_.drawText(L"--", {ability.x + 2.0F, ability.y + 23.0F,
                     ability.width - 4.0F, 34.0F}, 22, {0.42F, 0.44F, 0.48F, 1.0F});
             }
         }
 
-        const Rect side{1500.0F, 40.0F, 420.0F, 785.0F};
+        const Rect side = ui_.rect("hud.production.sidebar");
         renderer_.drawRect(side, {0.025F, 0.03F, 0.04F, 0.98F});
-        renderer_.drawImage("ui.hud.leftbar", {1500.0F, 40.0F, 24.0F, 785.0F});
-        renderer_.drawImage("ui.hud.rightbar", {1896.0F, 40.0F, 24.0F, 785.0F});
+        renderer_.drawImage("ui.hud.leftbar", ui_.rect("hud.production.leftbar"));
+        renderer_.drawImage("ui.hud.rightbar", ui_.rect("hud.production.rightbar"));
         renderer_.drawBorder(side, {0.75F, 0.55F, 0.18F, 1.0F}, 4.0F);
-        renderer_.drawText(L"10000", {1630.0F, 45.0F, 155.0F, 36.0F}, 28, {1.0F, 0.84F, 0.20F, 1.0F});
-        renderer_.drawText(T("production"), {1520.0F, 70.0F, 370.0F, 30.0F}, 20,
+        renderer_.drawText(L"10000", ui_.rect("hud.production.balance"), 28, {1.0F, 0.84F, 0.20F, 1.0F});
+        renderer_.drawText(T("production"), ui_.rect("hud.production.title"), 20,
             {0.95F, 0.78F, 0.22F, 1.0F});
         const std::string tabs[] = {"building", "defense", "infantry", "vehicles"};
         for (int index = 0; index < 4; ++index) {
-            const Rect tab{1520.0F + index * 96.0F, 108.0F, 88.0F, 42.0F};
+            const Rect tab = ui_.rect("hud.production.tab." + std::to_string(index));
             renderer_.drawImage(index == activeTab_ ? "ui.hud.tab_hover" : "ui.hud.tab", tab);
             renderer_.drawText(T(tabs[index]), tab, 16, {1.0F, 0.82F, 0.20F, 1.0F});
         }
-        renderer_.drawText(T("producer"), {1520.0F, 155.0F, 370.0F, 26.0F}, 16,
+        renderer_.drawText(T("producer"), ui_.rect("hud.production.producer.title"), 16,
             {0.86F, 0.68F, 0.22F, 1.0F});
         for (int index = 0; index < 3; ++index) {
-            const Rect producer{1520.0F + index * 126.0F, 180.0F, 118.0F, 42.0F};
+            const Rect producer = ui_.rect("hud.production.producer." + std::to_string(index));
             renderer_.drawImage("ui.hud.tab", producer, {0.55F, 0.55F, 0.58F, 1.0F});
             renderer_.drawText(L"--", producer, 18, {0.42F, 0.44F, 0.48F, 1.0F});
         }
         for (int index = 0; index < 12; ++index) {
-            const int column = index % 3;
-            const int row = index / 3;
-            const Rect product{1528.0F + column * 122.0F, 239.0F + row * 95.0F, 108.0F, 80.0F};
+            const Rect product = ui_.rect("hud.production.product." + std::to_string(index));
             renderer_.drawImage("ui.hud.button", product);
             renderer_.drawText(L"--", {product.x, product.y + 12.0F, product.width, 28.0F}, 24,
                 {0.42F, 0.44F, 0.48F, 1.0F});
         }
 
-        const Rect hudBackground{0.0F, 842.0F, 1920.0F, 238.0F};
+        const Rect hudBackground = ui_.rect("hud.background");
         renderer_.drawRect(hudBackground, {0.012F, 0.016F, 0.022F, 1.0F});
-        const Rect miniMap{8.0F, 850.0F, 320.0F, 220.0F};
-        const Rect model{336.0F, 850.0F, 200.0F, 220.0F};
-        const Rect info{544.0F, 850.0F, 490.0F, 220.0F};
-        const Rect portrait{1042.0F, 850.0F, 466.0F, 220.0F};
+        const Rect miniMap = ui_.rect("hud.minimap");
+        const Rect model = ui_.rect("hud.model");
+        const Rect info = ui_.rect("hud.info");
+        const Rect portrait = ui_.rect("hud.portrait");
         renderMiniMap(miniMap);
         drawHudPanel(model, T("unit_model"));
         drawHudPanel(info, T("unit_info"));
         drawHudPanel(portrait, T("portrait"));
         const auto selected = selectedEntity();
         const auto preview = previewEntity();
-        const Rect modelViewport{348.0F, 888.0F, 176.0F, 168.0F};
-        const Rect portraitViewport{1056.0F, 888.0F, 438.0F, 168.0F};
+        const Rect modelViewport = ui_.rect("hud.model.viewport");
+        const Rect portraitViewport = ui_.rect("hud.portrait.viewport");
         renderer_.drawRect(modelViewport, {0.005F, 0.008F, 0.012F, 1.0F});
         renderer_.drawRect(portraitViewport, {0.005F, 0.008F, 0.012F, 1.0F});
         if (preview != nullptr && assetReady_) {
@@ -1533,9 +1635,6 @@ private:
                 kRenderScale.hudModelScale);
             renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner, {1275.0F, 1005.0F},
                 kRenderScale.hudPortraitScale);
-            renderer_.drawText(animationLabel(preview->animationState) + L"  /  DIR " +
-                std::to_wstring(preview->facing), {1300.0F, 918.0F, 170.0F, 30.0F}, 15,
-                {1.0F, 0.82F, 0.20F, 1.0F}, false);
         } else {
             renderer_.drawText(L"--", modelViewport, 28, {0.42F, 0.44F, 0.48F, 1.0F});
             renderer_.drawText(L"--", portraitViewport, 28, {0.42F, 0.44F, 0.48F, 1.0F});
@@ -1557,17 +1656,16 @@ private:
                 {0.36F, 1.0F, 0.36F, 1.0F}, false);
         }
 
-        const Rect card{1518.0F, 850.0F, 382.0F, 188.0F};
-        drawHudPanel(card, L"COMMAND CARD  3 x 5");
+        const Rect card = ui_.rect("hud.command_card");
+        drawHudPanel(card, T("command_card"));
         if (pendingAction_ != PendingAction::None) {
-            renderer_.drawText(L"TARGET: " + pendingActionLabel(), {1700.0F, 855.0F, 188.0F, 20.0F}, 12,
+            renderer_.drawText(L"TARGET: " + pendingActionLabel(), ui_.childRect("hud.command_card", "hud.command_card.target"), 12,
                 {1.0F, 0.34F, 0.18F, 1.0F}, false);
         }
         const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "", "", "", "", "", "", "", "", "", ""};
         for (int slot = 0; slot < 15; ++slot) {
-            const int column = slot % 5;
-            const int row = slot / 5;
-            const Rect button{1523.0F + column * 76.0F, 878.0F + row * 52.0F, 72.0F, 48.0F};
+            const Rect button = ui_.childRect("hud.command_card",
+                "hud.command_card.slot." + std::to_string(slot));
             const bool hot = button.contains(mouse_.x, mouse_.y);
             const bool active = (slot == 0 && pendingAction_ == PendingAction::Move) ||
                 (slot == 3 && pendingAction_ == PendingAction::Patrol) ||
@@ -1580,13 +1678,9 @@ private:
             }
         }
 
-        renderer_.drawText(T("editor_title"), {116.0F, 10.0F, 280.0F, 30.0F}, 21,
+        renderer_.drawText(T("editor_title"), ui_.rect("editor.title"), 21,
             {1.0F, 0.82F, 0.20F, 1.0F}, false);
-        renderer_.drawText(T("palette_hint"), {410.0F, 10.0F, 1350.0F, 30.0F}, 15,
-            {0.80F, 0.82F, 0.82F, 1.0F}, false);
-        renderer_.drawText(T("editor_hint"), {410.0F, 34.0F, 1350.0F, 24.0F}, 13,
-            {0.58F, 0.62F, 0.66F, 1.0F}, false);
-        renderer_.drawText(L"MENU", {1820.0F, 8.0F, 90.0F, 40.0F}, 17,
+        renderer_.drawText(L"MENU", ui_.rect("editor.menu"), 17,
             {1.0F, 0.84F, 0.24F, 1.0F});
         if (placing_) {
             renderer_.drawBorder(world, placingOwner_ == Owner::Red ? Color{1.0F, 0.12F, 0.08F, 1.0F} :
@@ -1620,6 +1714,7 @@ private:
     renderer::D3D11Renderer renderer_;
     gamedata::RulesDatabase rules_;
     gamedata::ArtDatabase art_;
+    gamedata::UiLayoutDatabase ui_;
     westwood::Palette palette_;
     westwood::ShpTsDocument sprite_;
     std::unique_ptr<simulation::Simulation> simulation_;
@@ -1652,22 +1747,12 @@ private:
     ScreenCoord mouse_{};
     ScreenCoord dragStart_{};
     ScreenCoord dragEnd_{};
-    ScreenCoord sandboxPalettePosition_{118.0F, 92.0F};
+    ScreenCoord sandboxPalettePosition_{};
     ScreenCoord sandboxPaletteDragOffset_{};
     std::string lastMouseEvent_ = "NONE";
     IsometricCamera camera_{};
     std::size_t terrainTileCount_ = 0;
-    std::vector<MenuButton> menuButtons_ = {
-        {"campaign", "ui.main.button", "ui.main.button_hover", {1322.0F, 315.0F, 176.0F, 49.0F}},
-        {"load", "ui.main.button", "ui.main.button_hover", {1322.0F, 376.0F, 176.0F, 49.0F}},
-        {"skirmish", "ui.main.button", "ui.main.button_hover", {1322.0F, 437.0F, 176.0F, 49.0F}},
-        {"online", "ui.main.button", "ui.main.button_hover", {1322.0F, 498.0F, 176.0F, 49.0F}},
-        {"lan", "ui.main.button", "ui.main.button_hover", {1322.0F, 559.0F, 176.0F, 49.0F}},
-        {"settings", "ui.main.button", "ui.main.button_hover", {1322.0F, 620.0F, 176.0F, 49.0F}},
-        {"statistics", "ui.main.button", "ui.main.button_hover", {1322.0F, 681.0F, 176.0F, 49.0F}},
-        {"editor", "ui.main.button", "ui.main.button_hover", {1322.0F, 742.0F, 176.0F, 49.0F}},
-        {"exit", "ui.main.button", "ui.main.button_hover", {1322.0F, 803.0F, 176.0F, 49.0F}},
-    };
+    std::vector<MenuButton> menuButtons_;
 };
 
 } // namespace

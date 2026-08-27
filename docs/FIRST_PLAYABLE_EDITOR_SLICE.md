@@ -58,9 +58,12 @@ The runtime reads its own `INI/Rules.ini`, `INI/Art.ini`, `assets/game/ra2/infan
 - Engine `Direction8` is mapped to the SHP facing order through `ConSequence.FacingMap`; SHP crop metadata and a shared ground pivot drive rendering and screen-space selection.
 - The world uses an isometric camera with edge scrolling and cursor-centered wheel zoom. Static terrain remains in a GPU vertex buffer and receives camera constants at draw time.
 - Single selection, drag selection, empty-click deselect, right-click commands and keyboard commands.
+- Selection markers are projected from a world-ground circle into isometric ellipses. `SelectionRadius` is read from the unit Definition; selected markers are solid and hover/drag candidates are dashed.
+- Infantry occupancy is simulation state: each ground cell has `TopCenter`, `BottomLeft` and `BottomRight` subcells. An explicit `OccupancyProfile=Infantry` limits a destination cell to three units and searches nearby cells for additional units.
 - 3x5 command card with only Move, Stop, Hold, Patrol and Attack Move in the first row; the second and third rows are reserved.
 - Left collapsible strategic ability rail with empty slots and right two-tier production sidebar shell with disabled empty producer selectors.
-- Data-driven E2 voice samples for Select, Move acknowledgement and Attack acknowledgement, with procedural cues retained only as fallback/debug audio.
+- `INI/UI.ini` drives the RA2/YR skin image IDs, logical rects, parent-relative widget anchors and shared command-card/sandbox hit boxes. Rendering and input consume the same layout data.
+- Data-driven E2 VoiceSets load multiple original RA2/YR Select, Move and Attack samples, choose randomly without immediate repetition, and retain procedural cues only as fallback/debug audio.
 - Command acknowledgements use a dedicated voice stream and latest-intent queue policy; repeated simulation weapon events are a separate silent-until-sample `WeaponFire` path.
 
 ## Not implemented in this slice

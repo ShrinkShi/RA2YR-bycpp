@@ -1,5 +1,6 @@
 #include "GameData/Art.h"
 #include "GameData/Rules.h"
+#include "GameData/UI.h"
 #include "Westwood/Palette/Palette.h"
 #include "Simulation/Simulation.h"
 #include "Westwood/Ini/Ini.h"
@@ -62,7 +63,42 @@ Inviso=yes
     assert(rules.e2().faction == Faction::Soviet);
     assert(rules.e2().unitTags.size() == 2 && rules.e2().unitTags[0] == "Biological" &&
         rules.e2().unitTags[1] == "Infantry");
+    assert(std::abs(rules.e2().selectionRadius - 0.30F) < 0.001F);
+    assert(rules.e2().occupancyProfile == "Infantry");
+    assert(rules.e2().voiceSelect == "E2Select" && rules.e2().voiceMove == "E2Move" &&
+        rules.e2().voiceAttack == "E2Attack");
     assert(rules.e2().primary.projectile == "InvisibleLow");
+
+    gamedata::UiLayoutDatabase ui;
+    assert(ui.load(contentRoot / "INI/UI.ini", error));
+    assert(ui.theme().skin.name == "ra2_soviet");
+    const Rect commandSlot = ui.childRect("hud.command_card", "hud.command_card.slot.0");
+    assert(commandSlot.x == ui.rect("hud.command_card").x + 5.0F);
+    assert(commandSlot.y == ui.rect("hud.command_card").y + 28.0F);
+
+    westwood::IniDocument voices;
+    assert(voices.load(contentRoot / "assets/audio/voices.ini", error));
+    assert(voices.get("E2Select", "Files").find("e2_select_1.wav") != std::string::npos);
+    assert(voices.get("E2Select", "Files").find("e2_select_3.wav") != std::string::npos);
+    assert(voices.getBool("E2Select", "NoImmediateRepeat"));
+
+    const std::filesystem::path movedUiPath =
+        std::filesystem::temp_directory_path() / "ra2yr-ui-layout-test.ini";
+    {
+        std::ofstream movedUi(movedUiPath);
+        movedUi << "[Theme]\nName=test\n[Images]\n[Rects]\n"
+                   "world.viewport=0,0,100,100\n"
+                   "hud.command_card=400,500,382,188\n"
+                   "[RelativeRects]\n"
+                   "sandbox.title_bar=0,0,20,20\n"
+                   "hud.command_card.slot.0=5,28,72,48\n";
+    }
+    gamedata::UiLayoutDatabase movedUi;
+    assert(movedUi.load(movedUiPath, error));
+    const Rect movedCard = movedUi.rect("hud.command_card");
+    const Rect movedSlot = movedUi.childRect("hud.command_card", "hud.command_card.slot.0");
+    assert(movedSlot.x == movedCard.x + 5.0F && movedSlot.y == movedCard.y + 28.0F);
+    std::filesystem::remove(movedUiPath);
 
     gamedata::ArtDatabase art;
     assert(art.load(artPath, error));
@@ -186,6 +222,48 @@ Inviso=yes
     assert(boxSimulation.find(boxFirst)->selected);
     assert(boxSimulation.find(boxSecond)->selected);
     assert(!boxSimulation.find(boxOutside)->selected);
+
+    gamedata::UnitDefinition tagOnlyDefinition = definition;
+    tagOnlyDefinition.unitTags = {"Infantry"};
+    tagOnlyDefinition.occupancyProfile.clear();
+    simulation::Simulation explicitOccupancyOnly(animationDefinition);
+    const std::uint32_t tagOnly = explicitOccupancyOnly.spawn(tagOnlyDefinition, Owner::Red, {10, 10});
+    assert(explicitOccupancyOnly.find(tagOnly)->occupancySubcell == simulation::InfantrySubcell::None);
+
+    gamedata::UnitDefinition infantryDefinition = definition;
+    infantryDefinition.occupancyProfile = "Infantry";
+    infantryDefinition.selectionRadius = 0.30F;
+    simulation::Simulation occupancySimulation(animationDefinition);
+    const std::uint32_t infantryOne = occupancySimulation.spawn(infantryDefinition, Owner::Red, {10, 10});
+    const std::uint32_t infantryTwo = occupancySimulation.spawn(infantryDefinition, Owner::Red, {10, 10});
+    const std::uint32_t infantryThree = occupancySimulation.spawn(infantryDefinition, Owner::Red, {10, 10});
+    const std::uint32_t infantryFour = occupancySimulation.spawn(infantryDefinition, Owner::Red, {10, 10});
+    const auto* firstInfantry = occupancySimulation.find(infantryOne);
+    const auto* secondInfantry = occupancySimulation.find(infantryTwo);
+    const auto* thirdInfantry = occupancySimulation.find(infantryThree);
+    const auto* fourthInfantry = occupancySimulation.find(infantryFour);
+    const GridCoord requestedCell{10, 10};
+    assert(firstInfantry->occupancyCell == requestedCell);
+    assert(secondInfantry->occupancyCell == requestedCell);
+    assert(thirdInfantry->occupancyCell == requestedCell);
+    assert(firstInfantry->occupancySubcell != secondInfantry->occupancySubcell);
+    assert(firstInfantry->occupancySubcell != thirdInfantry->occupancySubcell);
+    assert(secondInfantry->occupancySubcell != thirdInfantry->occupancySubcell);
+    assert(fourthInfantry->occupancySubcell != simulation::InfantrySubcell::None);
+    assert(distance(firstInfantry->position, fourthInfantry->position) > 0.01F);
+    for (auto& entity : occupancySimulation.entities()) {
+        entity.selected = true;
+    }
+    occupancySimulation.issueMove({20, 20});
+    for (int step = 0; step < 300; ++step) {
+        occupancySimulation.update(1.0F / 60.0F);
+    }
+    const auto& occupiedEntities = occupancySimulation.entities();
+    for (std::size_t first = 0; first < occupiedEntities.size(); ++first) {
+        for (std::size_t second = first + 1; second < occupiedEntities.size(); ++second) {
+            assert(distance(occupiedEntities[first].position, occupiedEntities[second].position) > 0.01F);
+        }
+    }
 
     simulation::Simulation overrideSimulation(animationDefinition);
     const std::uint32_t overrideRed = overrideSimulation.spawn(definition, Owner::Red, {0, 0});

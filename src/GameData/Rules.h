@@ -27,6 +27,11 @@ struct UnitDefinition {
     std::string armorType = "Light";
     Faction faction = Faction::Neutral;
     std::vector<std::string> unitTags;
+    float selectionRadius = 0.30F;
+    std::string occupancyProfile;
+    std::string voiceSelect;
+    std::string voiceMove;
+    std::string voiceAttack;
     int sight = 5;
     bool selectable = true;
     bool autoAcquire = true;

@@ -114,4 +114,17 @@ bool IniDocument::hasKey(std::string_view section, std::string_view key) const {
     return sectionIt != sections_.end() && sectionIt->second.contains(std::string(key));
 }
 
+std::vector<std::pair<std::string, std::string>> IniDocument::entries(std::string_view section) const {
+    std::vector<std::pair<std::string, std::string>> result;
+    const auto sectionIt = sections_.find(std::string(section));
+    if (sectionIt == sections_.end()) {
+        return result;
+    }
+    result.reserve(sectionIt->second.size());
+    for (const auto& [key, value] : sectionIt->second) {
+        result.emplace_back(key, value);
+    }
+    return result;
+}
+
 } // namespace ra2yr::westwood

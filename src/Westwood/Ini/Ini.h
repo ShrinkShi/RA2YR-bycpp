@@ -4,6 +4,8 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace ra2yr::westwood {
 
@@ -17,6 +19,7 @@ public:
     [[nodiscard]] bool getBool(std::string_view section, std::string_view key, bool fallback = false) const;
     [[nodiscard]] bool hasSection(std::string_view section) const;
     [[nodiscard]] bool hasKey(std::string_view section, std::string_view key) const;
+    [[nodiscard]] std::vector<std::pair<std::string, std::string>> entries(std::string_view section) const;
 
 private:
     using Section = std::unordered_map<std::string, std::string>;

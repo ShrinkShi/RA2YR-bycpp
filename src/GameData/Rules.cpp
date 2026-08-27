@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <sstream>
 
 namespace ra2yr::gamedata {
@@ -42,6 +43,16 @@ Faction parseFaction(const std::string& value) {
     return Faction::Neutral;
 }
 
+bool parseFloat(const std::string& value, float& result) {
+    char* end = nullptr;
+    const float parsed = std::strtof(value.c_str(), &end);
+    if (end == value.c_str() || *end != '\0') {
+        return false;
+    }
+    result = parsed;
+    return true;
+}
+
 } // namespace
 
 bool RulesDatabase::load(const std::filesystem::path& rulesPath, std::string& error) {
@@ -66,6 +77,23 @@ bool RulesDatabase::load(const std::filesystem::path& rulesPath, std::string& er
     e2_.unitTags = splitList(rules.get("E2", "UnitTag"));
     if (e2_.unitTags.empty()) {
         error = "Enhanced Rules.ini must define at least one E2 UnitTag";
+        return false;
+    }
+    const std::string selectionRadius = rules.get("E2", "SelectionRadius");
+    if (!parseFloat(selectionRadius, e2_.selectionRadius) || e2_.selectionRadius <= 0.0F) {
+        error = "Enhanced Rules.ini must define a positive E2 SelectionRadius";
+        return false;
+    }
+    e2_.occupancyProfile = rules.get("E2", "OccupancyProfile");
+    if (e2_.occupancyProfile.empty()) {
+        error = "Enhanced Rules.ini must define E2 OccupancyProfile explicitly; do not infer it from UnitTag";
+        return false;
+    }
+    e2_.voiceSelect = rules.get("E2", "VoiceSelect");
+    e2_.voiceMove = rules.get("E2", "VoiceMove");
+    e2_.voiceAttack = rules.get("E2", "VoiceAttack");
+    if (e2_.voiceSelect.empty() || e2_.voiceMove.empty() || e2_.voiceAttack.empty()) {
+        error = "Enhanced Rules.ini must define E2 VoiceSelect, VoiceMove and VoiceAttack";
         return false;
     }
     e2_.sight = rules.getInt("E2", "Sight", 5);

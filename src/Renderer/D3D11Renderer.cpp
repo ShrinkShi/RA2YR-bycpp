@@ -8,6 +8,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <iostream>
 #include <iterator>
 #include <utility>
 
@@ -244,6 +245,8 @@ bool D3D11Renderer::initialize(SDL_Window* window, std::string& error) {
     window_ = window;
     SDL_GetWindowSize(window_, &viewportWidth_, &viewportHeight_);
     SDL_GetWindowSizeInPixels(window_, &pixelWidth_, &pixelHeight_);
+    std::cerr << "[Renderer] Window logical=" << viewportWidth_ << "x" << viewportHeight_
+        << " pixels=" << pixelWidth_ << "x" << pixelHeight_ << '\n';
     const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     comInitialized_ = SUCCEEDED(comResult) && comResult != RPC_E_CHANGED_MODE;
     return createDevice(window_, error) && createPipelines(error) && createTextResources(error) &&
@@ -515,6 +518,9 @@ void D3D11Renderer::setWorldCamera(WorldCoord worldCenter, float zoom, ScreenCoo
 void D3D11Renderer::beginFrame() {
     const float clearColor[] = {0.005F, 0.006F, 0.008F, 1.0F};
     context_->OMSetRenderTargets(1, renderTarget_.GetAddressOf(), nullptr);
+    // SDL reports the logical client size used by the input transform and by
+    // the 1920x1080 UI coordinate space. Keep the rasterizer and text target
+    // on that same virtual canvas; the swap chain handles the DPI pixel size.
     D3D11_VIEWPORT viewport{0.0F, 0.0F, static_cast<float>(viewportWidth_), static_cast<float>(viewportHeight_), 0.0F, 1.0F};
     context_->RSSetViewports(1, &viewport);
     context_->ClearRenderTargetView(renderTarget_.Get(), clearColor);

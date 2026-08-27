@@ -137,3 +137,21 @@
 - vcpkg manifest restore、CMake configure/generate、MSVC `/W4 /WX` compile/link 全部完成；CTest `1/1` 通过。
 - 实际启动 `ra2yr_client.exe`，窗口保持响应；日志确认语音表、Rules.ini、Art.ini、CONS.SHP、unittem.pal 已读取。
 - 采集主菜单、Editor HUD、F3、F6 八方向 Walk、Command Card target 证据；截图仅作为运行证据，不替代人工视觉/交互验收。
+
+## 2026-08-27 - PR #1 最终收口实现
+
+### 本轮处理
+- 复核远端 feature exact HEAD 为 `7e66e8770e81b01402609da077af97a6aee2b5dd`，保持 `main` 和 `agent/ra2yr-corpus-lfs` worktree 不变。
+- 将选择标识改为 camera 投影的地面椭圆，并使用 Rules 的 `SelectionRadius`；hover 和框选候选使用虚线，正式选中使用实线。
+- 将显式 `OccupancyProfile=Infantry` 实现为三 subcell Simulation occupancy，增加同一目的地的 3 人上限、邻近 cell 搜索和无重叠回归测试。
+- 将正式 UI geometry、图片主题和 parent-relative widget anchors 收拢到 `INI/UI.ini`，绘制和 hit-test 共用 `UiLayoutDatabase`。
+- 清理正式 HUD 开发提示，保留 F3 Debug Overlay；移除旧程序/SAPI 语音样本引用，接入本地 corpus 提取的原版 E2 多样本 VoiceSet。
+
+### 验证边界
+- 已完成定向代码审查和回归测试补充；最终 configure/build/CTest、EXE 启动和截图必须在提交前重新执行。
+
+## 2026-08-27 - PR #1 最终验证完成
+
+- `tools/dev/build.ps1` PASS；`tools/dev/test.ps1` PASS，CTest `1/1`。
+- 实际 EXE 进程保持响应，stderr 记录 SDL/D3D11 renderer 初始化、Rules/Art/CONS.SHP/unittem.pal 读取和三组 E2 VoiceSet 的九个样本加载。
+- 可用运行截图保存在 `artifacts/manual-validation/`（该目录已忽略，不进入 Git）；人工视觉/交互验收仍未宣称通过。

@@ -34,7 +34,7 @@
 ### 原因
 - 本轮优先级是动画和 HUD；程序化 cue 能验证事件链路，不冒充完整单位配音。
 
-## 2026-08-26 - 数据驱动的最小真实语音
+## 2026-08-26 - 数据驱动的最小真实语音（Superseded by corpus VoiceSet）
 
 ### 决策
 - 使用少量由 Windows SAPI `SpVoice` 生成的短 WAV 作为 E2 Select/Move/Attack 样例，通过 `assets/audio/voices.ini` 映射到通用 AudioCue。
@@ -109,3 +109,35 @@ Sprite constant buffer 从单色扩展为 16 个 RGBA 项；未来更多 HouseCo
 ### 验证边界
 
 - 本轮不新增第二单位、生产、ComputerPlayerAI、Trigger 或其他玩法范围。
+
+## 2026-08-27 - World-ground selection 与 Infantry occupancy
+
+### 决策
+- SelectionRadius 表示世界地面半径；渲染时构造 world-ground circle，再由 IsometricCamera 投影为椭圆。
+- Infantry subcell 是 Simulation occupancy 状态，不是 renderer 的视觉偏移。每个 cell 固定保留 TopCenter、BottomLeft、BottomRight 三个槽位，满格后按最近距离查找附近 cell。
+
+### 原因
+- 选取标识必须随 camera zoom 正确缩放并与 ground anchor 一致；单位不能仅靠绘制偏移伪造不重叠。
+
+## 2026-08-27 - UI.ini 作为 Widget geometry 单一来源
+
+### 决策
+- `UiLayoutDatabase` 解析主题图片、绝对 rect 和 parent-relative rect。绘制与输入都通过同一组 `rect()`/`childRect()` 读取，relative rect 同时作为锚点和 hit box。
+
+### 原因
+- 修改 UI.ini 的父级位置时，Command Card、Sandbox 浮窗等子控件的视觉位置和点击位置必须同步变化。
+
+## 2026-08-27 - VoiceSet 多样本播放
+
+### 决策
+- Rules 只保存 VoiceSet ID；`voices.ini` 用 `Files` 和 `NoImmediateRepeat` 定义样本集合。AudioService 每次有效命令只发布一次 acknowledgement，并在集合内随机选择不立即重复的样本。
+
+### 原因
+- 原版单位语音属于数据内容，不能用 E2 条件分支或程序生成音替代；清空 voice stream 可防止连续命令堆积旧 acknowledgement。
+
+## 2026-08-27 - 最终验证边界
+
+### 决策
+
+- 保持本轮范围在现有 Editor Sandbox 的选择标识、Simulation occupancy、UI.ini 主题布局和 E2 VoiceSet；不新增完整 Editor 绘图工具、复杂 Unit Info Panel、第二单位、生产、AI 或 Trigger。
+- 运行截图作为可复核证据保存，但不把自动截图、静态检查或 CTest 描述为人工视觉/交互验收通过。

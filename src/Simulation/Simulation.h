@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -19,6 +20,13 @@ enum class AnimationState : std::uint8_t {
     Death,
 };
 
+enum class InfantrySubcell : std::int8_t {
+    None = -1,
+    TopCenter = 0,
+    BottomLeft = 1,
+    BottomRight = 2,
+};
+
 struct Entity {
     std::uint32_t id = 0;
     std::string definitionId;
@@ -26,6 +34,12 @@ struct Entity {
     Owner owner = Owner::Neutral;
     Faction faction = Faction::Neutral;
     WorldCoord position{};
+    float selectionRadius = 0.30F;
+    std::string occupancyProfile;
+    GridCoord occupancyCell{};
+    InfantrySubcell occupancySubcell = InfantrySubcell::None;
+    GridCoord reservedCell{};
+    InfantrySubcell reservedSubcell = InfantrySubcell::None;
     int health = 1;
     int maxHealth = 1;
     int speed = 1;
@@ -74,11 +88,25 @@ public:
     [[nodiscard]] Entity* find(std::uint32_t id);
 
 private:
+    struct SubcellLocation {
+        GridCoord cell{};
+        InfantrySubcell subcell = InfantrySubcell::None;
+    };
+
     void setAnimation(Entity& entity, AnimationState state);
     void setFacing(Entity& entity, float dx, float dy);
     void updateAnimation(Entity& entity, float seconds);
     void applyToSelected(const Command& command, bool clearRecentAttacker = false);
     void updateEntity(Entity& entity, float seconds);
+    void releaseOccupancy(Entity& entity);
+    void releaseReservation(Entity& entity);
+    [[nodiscard]] bool reserveDestination(Entity& entity, GridCoord destination);
+    void commitReservation(Entity& entity);
+    [[nodiscard]] WorldCoord movementDestination(const Entity& entity) const;
+    [[nodiscard]] static bool isInfantry(const Entity& entity);
+    [[nodiscard]] std::optional<SubcellLocation> findAvailableSubcell(GridCoord requested,
+        std::uint32_t entityId) const;
+    static WorldCoord subcellPosition(GridCoord cell, InfantrySubcell subcell);
     [[nodiscard]] Entity* nearestEnemy(const Entity& source, float maxDistance);
     [[nodiscard]] const gamedata::AnimationSequence* animationSequence(AnimationState state) const;
     [[nodiscard]] static const char* animationSequenceName(AnimationState state);
@@ -86,6 +114,7 @@ private:
 
     gamedata::ArtDefinition animationDefinition_;
     std::vector<Entity> entities_;
+    std::map<std::pair<int, int>, std::array<std::uint32_t, 3>> infantryOccupancy_;
     std::uint32_t nextId_ = 1;
 };
 

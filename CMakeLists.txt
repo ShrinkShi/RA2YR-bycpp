@@ -28,6 +28,8 @@ add_library(ra2yr_core
     src/GameData/Art.h
     src/GameData/Rules.cpp
     src/GameData/Rules.h
+    src/GameData/UI.cpp
+    src/GameData/UI.h
     src/Simulation/Simulation.cpp
     src/Simulation/Simulation.h
 )

@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <utility>
 
 namespace ra2yr::simulation {
 namespace {
 
 constexpr float kPi = 3.14159265358979323846F;
+constexpr float kInfantrySubcellOffset = 0.30F;
 
 WorldCoord toWorld(GridCoord coord) {
     return {static_cast<float>(coord.x), static_cast<float>(coord.y)};
@@ -15,6 +17,28 @@ WorldCoord toWorld(GridCoord coord) {
 
 GridCoord toGrid(WorldCoord coord) {
     return {static_cast<int>(std::lround(coord.x)), static_cast<int>(std::lround(coord.y))};
+}
+
+std::pair<int, int> cellKey(GridCoord cell) {
+    return {cell.x, cell.y};
+}
+
+WorldCoord subcellOffset(InfantrySubcell subcell) {
+    switch (subcell) {
+    case InfantrySubcell::TopCenter:
+        return {0.0F, -kInfantrySubcellOffset};
+    case InfantrySubcell::BottomLeft:
+        return {-kInfantrySubcellOffset, kInfantrySubcellOffset};
+    case InfantrySubcell::BottomRight:
+        return {kInfantrySubcellOffset, kInfantrySubcellOffset};
+    case InfantrySubcell::None:
+        return {};
+    }
+    return {};
+}
+
+bool movementOrder(CommandKind kind) {
+    return kind == CommandKind::Move || kind == CommandKind::Patrol || kind == CommandKind::AttackMove;
 }
 
 bool hostile(Owner first, Owner second) {
@@ -73,7 +97,23 @@ std::uint32_t Simulation::spawn(const gamedata::UnitDefinition& definition, Owne
     entity.unitTags = definition.unitTags;
     entity.owner = owner;
     entity.faction = definition.faction;
-    entity.position = toWorld(position);
+    entity.selectionRadius = definition.selectionRadius;
+    entity.occupancyProfile = definition.occupancyProfile;
+    entity.occupancyCell = position;
+    if (isInfantry(entity)) {
+        const auto location = findAvailableSubcell(position, entity.id);
+        if (location.has_value()) {
+            entity.occupancyCell = location->cell;
+            entity.occupancySubcell = location->subcell;
+            entity.position = subcellPosition(entity.occupancyCell, entity.occupancySubcell);
+        } else {
+            // Keep a valid world position if the bounded search is exhausted;
+            // an unassigned entity must never be inserted with a None slot.
+            entity.position = toWorld(position);
+        }
+    } else {
+        entity.position = toWorld(position);
+    }
     entity.health = definition.strength;
     entity.maxHealth = definition.strength;
     entity.speed = std::max(1, definition.speed);
@@ -82,6 +122,9 @@ std::uint32_t Simulation::spawn(const gamedata::UnitDefinition& definition, Owne
     entity.weaponDamage = std::max(1, definition.primary.damage);
     entity.autoAcquire = definition.autoAcquire;
     entity.returnFire = definition.returnFire;
+    if (isInfantry(entity) && entity.occupancySubcell != InfantrySubcell::None) {
+        infantryOccupancy_[cellKey(entity.occupancyCell)][static_cast<std::size_t>(entity.occupancySubcell)] = entity.id;
+    }
     entities_.push_back(std::move(entity));
     return entities_.back().id;
 }
@@ -99,6 +142,13 @@ void Simulation::update(float seconds) {
 
     const auto* deathSequence = animationSequence(AnimationState::Death);
     const int lastDeathFrame = deathSequence == nullptr ? 0 : deathSequence->frameCount - 1;
+    for (Entity& entity : entities_) {
+        if (entity.health <= 0 && entity.animationState == AnimationState::Death &&
+            entity.animationFrame >= lastDeathFrame) {
+            releaseReservation(entity);
+            releaseOccupancy(entity);
+        }
+    }
     entities_.erase(std::remove_if(entities_.begin(), entities_.end(), [lastDeathFrame](const Entity& entity) {
         return entity.health <= 0 && entity.animationState == AnimationState::Death &&
             entity.animationFrame >= lastDeathFrame;
@@ -170,7 +220,7 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
         }
     }
 
-    const WorldCoord destination = toWorld(entity.order.destination);
+    const WorldCoord destination = movementDestination(entity);
     const bool hasDestination = orderKind == CommandKind::Move || orderKind == CommandKind::Patrol ||
         orderKind == CommandKind::AttackMove;
     if (!attacking && !moving && (target == nullptr || !isAlive(*target)) && hasDestination &&
@@ -185,9 +235,12 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
             entity.position.y += dy / length * std::min(step, length);
             moving = true;
         }
-    } else if (!attacking && !moving && orderKind == CommandKind::Patrol && entity.patrolPoint.has_value() &&
-        distance(entity.position, destination) <= 0.12F) {
-        std::swap(entity.order.destination, *entity.patrolPoint);
+    } else if (!attacking && !moving && hasDestination && distance(entity.position, destination) <= 0.12F) {
+        commitReservation(entity);
+        if (orderKind == CommandKind::Patrol && entity.patrolPoint.has_value()) {
+            std::swap(entity.order.destination, *entity.patrolPoint);
+            static_cast<void>(reserveDestination(entity, entity.order.destination));
+        }
     }
 
     if (attacking) {
@@ -294,12 +347,16 @@ void Simulation::selectBox(const std::array<WorldCoord, 4>& corners) {
 void Simulation::applyToSelected(const Command& command, bool clearRecentAttacker) {
     for (Entity& entity : entities_) {
         if (entity.selected && isAlive(entity)) {
+            releaseReservation(entity);
             entity.order = command;
             if (clearRecentAttacker) {
                 entity.recentAttacker = 0;
             }
             if (command.kind != CommandKind::Patrol) {
                 entity.patrolPoint.reset();
+            }
+            if (movementOrder(command.kind)) {
+                static_cast<void>(reserveDestination(entity, command.destination));
             }
         }
     }
@@ -320,9 +377,11 @@ void Simulation::issueHold() {
 void Simulation::issuePatrol(GridCoord destination) {
     for (Entity& entity : entities_) {
         if (entity.selected && isAlive(entity)) {
-            entity.patrolPoint = toGrid(entity.position);
+            releaseReservation(entity);
+            entity.patrolPoint = entity.occupancyCell;
             entity.order = {CommandKind::Patrol, destination, 0};
             entity.recentAttacker = 0;
+            static_cast<void>(reserveDestination(entity, destination));
         }
     }
 }
@@ -363,6 +422,121 @@ Entity* Simulation::nearestEnemy(const Entity& source, float maxDistance) {
         }
     }
     return result;
+}
+
+bool Simulation::isInfantry(const Entity& entity) {
+    return entity.occupancyProfile == "Infantry";
+}
+
+WorldCoord Simulation::subcellPosition(GridCoord cell, InfantrySubcell subcell) {
+    const WorldCoord center = toWorld(cell);
+    const WorldCoord offset = subcellOffset(subcell);
+    return {center.x + offset.x, center.y + offset.y};
+}
+
+std::optional<Simulation::SubcellLocation> Simulation::findAvailableSubcell(GridCoord requested,
+    std::uint32_t entityId) const {
+    float bestDistance = std::numeric_limits<float>::max();
+    std::optional<SubcellLocation> best;
+    const WorldCoord requestedCenter = toWorld(requested);
+    for (int radius = 0; radius <= 8; ++radius) {
+        for (int y = requested.y - radius; y <= requested.y + radius; ++y) {
+            for (int x = requested.x - radius; x <= requested.x + radius; ++x) {
+                if (std::max(std::abs(x - requested.x), std::abs(y - requested.y)) != radius) {
+                    continue;
+                }
+                const auto it = infantryOccupancy_.find(cellKey({x, y}));
+                for (int slot = 0; slot < 3; ++slot) {
+                    const std::uint32_t occupant = it == infantryOccupancy_.end() ? 0 :
+                        it->second[static_cast<std::size_t>(slot)];
+                    if (occupant != 0 && occupant != entityId) {
+                        continue;
+                    }
+                    const InfantrySubcell candidate = static_cast<InfantrySubcell>(slot);
+                    const float candidateDistance = distance(subcellPosition({x, y}, candidate), requestedCenter);
+                    if (candidateDistance < bestDistance) {
+                        bestDistance = candidateDistance;
+                        best = SubcellLocation{{x, y}, candidate};
+                    }
+                }
+            }
+        }
+        if (best.has_value() && radius > 0) {
+            break;
+        }
+    }
+    return best;
+}
+
+void Simulation::releaseOccupancy(Entity& entity) {
+    if (!isInfantry(entity) || entity.occupancySubcell == InfantrySubcell::None) {
+        return;
+    }
+    const auto it = infantryOccupancy_.find(cellKey(entity.occupancyCell));
+    if (it == infantryOccupancy_.end()) {
+        return;
+    }
+    auto& slots = it->second;
+    const std::size_t slot = static_cast<std::size_t>(entity.occupancySubcell);
+    if (slot < slots.size() && slots[slot] == entity.id) {
+        slots[slot] = 0;
+    }
+    if (std::all_of(slots.begin(), slots.end(), [](std::uint32_t occupant) { return occupant == 0; })) {
+        infantryOccupancy_.erase(it);
+    }
+}
+
+void Simulation::releaseReservation(Entity& entity) {
+    if (!isInfantry(entity) || entity.reservedSubcell == InfantrySubcell::None) {
+        return;
+    }
+    const auto it = infantryOccupancy_.find(cellKey(entity.reservedCell));
+    if (it != infantryOccupancy_.end()) {
+        auto& slots = it->second;
+        const std::size_t slot = static_cast<std::size_t>(entity.reservedSubcell);
+        if (slot < slots.size() && slots[slot] == entity.id) {
+            slots[slot] = 0;
+        }
+        if (std::all_of(slots.begin(), slots.end(), [](std::uint32_t occupant) { return occupant == 0; })) {
+            infantryOccupancy_.erase(it);
+        }
+    }
+    entity.reservedSubcell = InfantrySubcell::None;
+}
+
+bool Simulation::reserveDestination(Entity& entity, GridCoord destination) {
+    if (!isInfantry(entity) || destination == entity.occupancyCell) {
+        return true;
+    }
+    const auto location = findAvailableSubcell(destination, entity.id);
+    if (!location.has_value()) {
+        return false;
+    }
+    entity.reservedCell = location->cell;
+    entity.reservedSubcell = location->subcell;
+    infantryOccupancy_[cellKey(location->cell)][static_cast<std::size_t>(location->subcell)] = entity.id;
+    return true;
+}
+
+void Simulation::commitReservation(Entity& entity) {
+    if (!isInfantry(entity) || entity.reservedSubcell == InfantrySubcell::None) {
+        return;
+    }
+    releaseOccupancy(entity);
+    entity.occupancyCell = entity.reservedCell;
+    entity.occupancySubcell = entity.reservedSubcell;
+    entity.position = subcellPosition(entity.occupancyCell, entity.occupancySubcell);
+    entity.reservedSubcell = InfantrySubcell::None;
+}
+
+WorldCoord Simulation::movementDestination(const Entity& entity) const {
+    if (isInfantry(entity) && entity.reservedSubcell != InfantrySubcell::None) {
+        return subcellPosition(entity.reservedCell, entity.reservedSubcell);
+    }
+    if (isInfantry(entity) && entity.order.destination == entity.occupancyCell) {
+        return entity.position;
+    }
+    return toWorld(entity.order.destination);
 }
 
 const gamedata::AnimationSequence* Simulation::animationSequence(AnimationState state) const {

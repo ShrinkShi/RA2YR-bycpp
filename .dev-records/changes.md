@@ -51,7 +51,7 @@
 - `Simulation::spawn` 接收 `UnitDefinition`，Entity 独立保存 Definition ID、Faction、多个 UnitTag、AutoAcquire、ReturnFire 和最近攻击者。
 - Idle/Stop/Hold 只在射程内自动开火，不追击；AttackMove 继续沿路索敌和追击；受击后 ReturnFire 接入 Simulation。
 - Strategic Ability Bar 和 Producer Selector 在无 Provider/Entity 时显示 disabled 空槽，不伪造能力名或建筑名。
-- 新增 `assets/audio/voices.ini` 与三个由 Windows SAPI 生成的短 WAV 样例，AudioService 以数据表选择语音，程序化 cue 仅作 fallback/debug。
+- 新增 `assets/audio/voices.ini` 与三个由 Windows SAPI 生成的短 WAV 样例（历史实现，已被本轮 corpus 原版 VoiceSet 素材 Superseded），AudioService 以数据表选择语音，程序化 cue 仅作 fallback/debug。
 - 调整 RA2/YR 主菜单控制台和按钮布局，命名 `RenderScaleConfig` 集中世界/单位/UI 比例。
 - 更新 corpus Superseded 说明与第三方素材清单。
 
@@ -85,3 +85,25 @@
 - 完成干净 build 目录验证：独立 vcpkg restore、CMake configure、MSVC x64 compile/link、CTest 和实际运行均成功。
 - 运行时输出确认 `VoiceSelect`、`VoiceMoveAcknowledgement`、`VoiceAttackAcknowledgement` 数据项加载，以及 Rules/Art/CONS.SHP/unittem.pal 内容链路可用。
 - 保留 UI 结构收口：五段底部 HUD、3x5 Command Card、空 Strategic/Producer provider 槽位和独立 SandboxPalette。
+
+## 2026-08-27 - PR #1 最终收口：选择、占位、UI Skin 与原版 VoiceSet
+
+### 变更范围
+- 不新增完整 Editor 绘图工具、复杂 Unit Info Panel、第二单位、生产、AI、Trigger 或资源系统；仅收口现有首轮 Sandbox 的视觉和数据边界。
+
+### 具体改动
+- 选择标识改为以 `SelectionRadius` 为半径的 world-ground 圆，经等距 Camera 投影为椭圆；选中实线，hover/框选候选虚线，已选单位不叠加虚线。
+- `OccupancyProfile=Infantry` 进入 Simulation occupancy；每个 Ground Cell 使用 TopCenter/BottomLeft/BottomRight 三个 subcell，满格后搜索最近可用 cell，避免最终坐标重叠。
+- 清理正式 HUD 的开发提示；F3 保留调试数据，正式底部 HUD 保持五段结构。
+- 新增 `INI/UI.ini` 和 `UiLayoutDatabase`，以主题图片、父级 rect、相对锚点作为绘制与 hit-test 的唯一来源；迁移主菜单、Command Card、HUD、生产栏、战略栏和 Sandbox 浮窗。
+- `VoiceSelect/VoiceMove/VoiceAttack` 改为数据驱动 VoiceSet，多样本随机且禁止立即重复；接入本地 RA2/YR corpus 提取的原版 E2 样本。
+
+### 验证边界
+- 自动测试覆盖 UI 父级移动同步、VoiceSet 配置、多 Infantry subcell 和最终不重叠；真实 configure/build/CTest/运行截图将在本轮所有改动完成后重跑。
+- 截图和自动化结果只作为运行证据，不替代用户的最终视觉/交互验收。
+
+## 2026-08-27 - 最终验证记录
+
+- 运行 `tools/dev/build.ps1`：MSVC x64 compile/link PASS；`tools/dev/test.ps1`：CTest `1/1` PASS。
+- 实际启动 `build/windows-vcpkg/ra2yr_client.exe`，进程保持响应；日志确认 SDL/D3D11 renderer、Rules/Art、CONS.SHP、unittem.pal 和 E2Select/E2Move/E2Attack 各 3 个 WAV 样本加载。
+- 运行时诊断确认 SDL logical/pixel canvas 为 `1280x720`；截图工具在当前桌面合成环境下存在黑帧/被遮挡情况，保留的截图仅作为运行证据，不替代人工视觉/交互验收。
