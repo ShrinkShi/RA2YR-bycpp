@@ -107,3 +107,20 @@
 - 运行 `tools/dev/build.ps1`：MSVC x64 compile/link PASS；`tools/dev/test.ps1`：CTest `1/1` PASS。
 - 实际启动 `build/windows-vcpkg/ra2yr_client.exe`，进程保持响应；日志确认 SDL/D3D11 renderer、Rules/Art、CONS.SHP、unittem.pal 和 E2Select/E2Move/E2Attack 各 3 个 WAV 样本加载。
 - 运行时诊断确认 SDL logical/pixel canvas 为 `1280x720`；截图工具在当前桌面合成环境下存在黑帧/被遮挡情况，保留的截图仅作为运行证据，不替代人工视觉/交互验收。
+
+## 2026-08-27 - PR #1 UI Skin merge blocker 收口
+
+### 变更范围
+- 只补齐正式 UI 面板的主题图片数据化；不新增 Gameplay、完整 Editor 绘图工具或复杂 Unit Info Panel。
+
+### 具体改动
+- 在 `INI/UI.ini` 增加 HUD 总背景、Minimap、Model、UnitInfo、Portrait、Command Card、Production、Strategic 和 Sandbox 的独立主题图片 ID。
+- 新增 `assets/ui/themes/ra2_soviet/{hud,editor}` 下的项目自有 RA2/YR 风格正式面板 PNG，并让 CMake 资源复制流程带入构建目录。
+- 正式 HUD/生产栏/战略栏/Sandbox 外壳改用 `renderer.drawImage(theme asset, rect)`；动态内容仍使用代码绘制。
+- `core_tests` 校验九个正式面板 image ID 均存在且默认主题路径可解析；文档记录 MOD 可独立替换图片与修改 rect。
+
+### 验证情况
+- `tools/dev/setup.ps1`：CMake configure/generate PASS，vcpkg manifest restore 已使用已有依赖。
+- `tools/dev/build.ps1`：MSVC x64 compile/link PASS。
+- `tools/dev/test.ps1`：CTest `1/1` PASS。
+- 实际启动 `build/windows-vcpkg/ra2yr_client.exe`，进程保持响应；构建目录确认九个主题 PNG 已复制，运行日志确认 SDL/D3D11、Rules/Art、CONS.SHP、unittem.pal 和 VoiceSet 加载。

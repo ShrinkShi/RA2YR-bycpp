@@ -141,3 +141,18 @@ Sprite constant buffer 从单色扩展为 16 个 RGBA 项；未来更多 HouseCo
 
 - 保持本轮范围在现有 Editor Sandbox 的选择标识、Simulation occupancy、UI.ini 主题布局和 E2 VoiceSet；不新增完整 Editor 绘图工具、复杂 Unit Info Panel、第二单位、生产、AI 或 Trigger。
 - 运行截图作为可复核证据保存，但不把自动截图、静态检查或 CTest 描述为人工视觉/交互验收通过。
+
+## 2026-08-27 - Formal panel skin assets
+
+### 决策
+
+- 将正式 HUD 外壳拆为独立的 `UiLayoutDatabase` 图片 ID：总 HUD、五段底部 HUD 面板、生产栏、战略栏和 Sandbox 浮窗各自拥有独立路径；Rect/Anchor 继续由 `UI.ini` 单独控制。
+- RA2 Soviet 默认主题使用项目自有生成 PNG 作为正式外壳；绘制统一调用 `renderer.drawImage(imageId, rect)`，只把 drawRect/drawBorder 留给地图内容、按钮内容、遮罩和调试元素。
+
+### 原因
+
+- MOD 替换单个面板素材或调整面板 Rect 时，不需要修改 C++，且同一 Rect 仍同时决定贴图位置与相关 widget 命中区域。
+
+### 代价
+
+- 主题图片缺失时当前正式运行会在资源加载阶段明确失败；这避免静默退回线框外壳，并要求每个发布主题完整提供声明的面板素材。

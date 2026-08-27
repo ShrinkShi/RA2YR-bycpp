@@ -155,3 +155,9 @@
 - `tools/dev/build.ps1` PASS；`tools/dev/test.ps1` PASS，CTest `1/1`。
 - 实际 EXE 进程保持响应，stderr 记录 SDL/D3D11 renderer 初始化、Rules/Art/CONS.SHP/unittem.pal 读取和三组 E2 VoiceSet 的九个样本加载。
 - 可用运行截图保存在 `artifacts/manual-validation/`（该目录已忽略，不进入 Git）；人工视觉/交互验收仍未宣称通过。
+
+## 2026-08-27 - UI Skin merge blocker 收口
+
+- 复核现有 UI layout/image 分离设计，在 `INI/UI.ini` 增加九个正式面板主题图片映射。
+- 新增并构建复制 `assets/ui/themes/ra2_soviet/hud/*.png` 与 `editor/sandbox.png`；正式面板外壳改由 `renderer.drawImage` 使用这些主题素材。
+- 增加默认主题图片路径回归断言，完成 configure、MSVC compile/link、CTest 和实际 EXE 响应检查；未触碰独立 corpus worktree，未新增 Gameplay 范围。

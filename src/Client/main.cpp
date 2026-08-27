@@ -582,6 +582,9 @@ private:
         const std::string imageIds[] = {
             "ui.main.background", "ui.main.button", "ui.main.button_hover", "ui.hud.leftbar",
             "ui.hud.rightbar", "ui.hud.button", "ui.hud.button_hover", "ui.hud.tab", "ui.hud.tab_hover",
+            "ui.hud.background", "ui.hud.minimap.background", "ui.hud.model.background",
+            "ui.hud.unitinfo.background", "ui.hud.portrait.background", "ui.hud.commandcard.background",
+            "ui.hud.production.background", "ui.hud.strategic.background", "ui.editor.sandbox.background",
         };
         for (const std::string& id : imageIds) {
             const std::filesystem::path path = ui_.imagePath(id, contentRoot_);
@@ -1384,15 +1387,14 @@ private:
         renderer_.drawText(L"RED COMMAND CONSOLE  //  C++23 / SDL3 / D3D11", {350.0F, 1008.0F, 1220.0F, 28.0F}, 14, {0.72F, 0.34F, 0.18F, 1.0F}, false);
     }
 
-    void drawHudPanel(Rect panel, const std::wstring& title) {
-        renderer_.drawRect(panel, {0.018F, 0.023F, 0.030F, 0.99F});
-        renderer_.drawBorder(panel, {0.67F, 0.47F, 0.17F, 1.0F}, 3.0F);
+    void drawHudPanel(Rect panel, const std::string& backgroundAsset, const std::wstring& title) {
+        renderer_.drawImage(backgroundAsset, panel);
         renderer_.drawText(title, {panel.x + 12.0F, panel.y + 7.0F, panel.width - 24.0F, 26.0F}, 16,
             {1.0F, 0.82F, 0.20F, 1.0F}, false);
     }
 
     void renderMiniMap(Rect panel) {
-        drawHudPanel(panel, T("minimap"));
+        drawHudPanel(panel, "ui.hud.minimap.background", T("minimap"));
         const Rect field = ui_.childRect("hud.minimap", "minimap.field");
         renderer_.drawRect(field, {0.025F, 0.10F, 0.065F, 1.0F});
         for (int index = 1; index < 8; ++index) {
@@ -1450,8 +1452,7 @@ private:
         }
         const SandboxPaletteLayout layout = sandboxPaletteLayout();
         const Rect palette = layout.window;
-        renderer_.drawRect(palette, {0.015F, 0.035F, 0.060F, 0.97F});
-        renderer_.drawBorder(palette, {0.24F, 0.62F, 0.86F, 1.0F}, 3.0F);
+        renderer_.drawImage("ui.editor.sandbox.background", palette);
         renderer_.drawText(T("sandbox_palette"), {palette.x + 12.0F, palette.y + 5.0F, 172.0F, 30.0F}, 18,
             {0.65F, 0.88F, 1.0F, 1.0F}, false);
         renderer_.drawText(sandboxPaletteCollapsed_ ? L"+" : L"_", layout.collapseButton, 18,
@@ -1565,10 +1566,9 @@ private:
         }
 
         const Rect strategicRail = ui_.rect("hud.strategic.rail");
-        renderer_.drawRect(strategicRail, {0.025F, 0.035F, 0.045F, 0.98F});
+        renderer_.drawImage("ui.hud.strategic.background", strategicRail);
         renderer_.drawImage("ui.hud.leftbar", ui_.rect("hud.strategic.leftbar"));
         renderer_.drawImage("ui.hud.leftbar", ui_.rect("hud.strategic.rightbar"));
-        renderer_.drawBorder(ui_.rect("hud.strategic.frame"), {0.64F, 0.42F, 0.16F, 1.0F}, 2.0F);
         const Rect collapseButton = ui_.rect("hud.strategic.collapse");
         renderer_.drawImage("ui.hud.button", collapseButton);
         renderer_.drawText(strategicCollapsed_ ? T("expand") : T("collapse"), collapseButton, 12,
@@ -1585,10 +1585,9 @@ private:
         }
 
         const Rect side = ui_.rect("hud.production.sidebar");
-        renderer_.drawRect(side, {0.025F, 0.03F, 0.04F, 0.98F});
+        renderer_.drawImage("ui.hud.production.background", side);
         renderer_.drawImage("ui.hud.leftbar", ui_.rect("hud.production.leftbar"));
         renderer_.drawImage("ui.hud.rightbar", ui_.rect("hud.production.rightbar"));
-        renderer_.drawBorder(side, {0.75F, 0.55F, 0.18F, 1.0F}, 4.0F);
         renderer_.drawText(L"10000", ui_.rect("hud.production.balance"), 28, {1.0F, 0.84F, 0.20F, 1.0F});
         renderer_.drawText(T("production"), ui_.rect("hud.production.title"), 20,
             {0.95F, 0.78F, 0.22F, 1.0F});
@@ -1613,15 +1612,15 @@ private:
         }
 
         const Rect hudBackground = ui_.rect("hud.background");
-        renderer_.drawRect(hudBackground, {0.012F, 0.016F, 0.022F, 1.0F});
+        renderer_.drawImage("ui.hud.background", hudBackground);
         const Rect miniMap = ui_.rect("hud.minimap");
         const Rect model = ui_.rect("hud.model");
         const Rect info = ui_.rect("hud.info");
         const Rect portrait = ui_.rect("hud.portrait");
         renderMiniMap(miniMap);
-        drawHudPanel(model, T("unit_model"));
-        drawHudPanel(info, T("unit_info"));
-        drawHudPanel(portrait, T("portrait"));
+        drawHudPanel(model, "ui.hud.model.background", T("unit_model"));
+        drawHudPanel(info, "ui.hud.unitinfo.background", T("unit_info"));
+        drawHudPanel(portrait, "ui.hud.portrait.background", T("portrait"));
         const auto selected = selectedEntity();
         const auto preview = previewEntity();
         const Rect modelViewport = ui_.rect("hud.model.viewport");
@@ -1657,7 +1656,7 @@ private:
         }
 
         const Rect card = ui_.rect("hud.command_card");
-        drawHudPanel(card, T("command_card"));
+        drawHudPanel(card, "ui.hud.commandcard.background", T("command_card"));
         if (pendingAction_ != PendingAction::None) {
             renderer_.drawText(L"TARGET: " + pendingActionLabel(), ui_.childRect("hud.command_card", "hud.command_card.target"), 12,
                 {1.0F, 0.34F, 0.18F, 1.0F}, false);

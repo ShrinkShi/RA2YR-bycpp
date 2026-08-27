@@ -72,6 +72,15 @@ Inviso=yes
     gamedata::UiLayoutDatabase ui;
     assert(ui.load(contentRoot / "INI/UI.ini", error));
     assert(ui.theme().skin.name == "ra2_soviet");
+    const std::array<const char*, 9> formalPanelImages = {
+        "ui.hud.background", "ui.hud.minimap.background", "ui.hud.model.background",
+        "ui.hud.unitinfo.background", "ui.hud.portrait.background", "ui.hud.commandcard.background",
+        "ui.hud.production.background", "ui.hud.strategic.background", "ui.editor.sandbox.background",
+    };
+    for (const char* imageId : formalPanelImages) {
+        assert(ui.hasImage(imageId));
+        assert(std::filesystem::exists(ui.imagePath(imageId, contentRoot)));
+    }
     const Rect commandSlot = ui.childRect("hud.command_card", "hud.command_card.slot.0");
     assert(commandSlot.x == ui.rect("hud.command_card").x + 5.0F);
     assert(commandSlot.y == ui.rect("hud.command_card").y + 28.0F);
