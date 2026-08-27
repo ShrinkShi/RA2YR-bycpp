@@ -70,8 +70,9 @@ bool pointInConvexQuad(WorldCoord point, const std::array<WorldCoord, 4>& corner
 
 } // namespace
 
-Simulation::Simulation(const gamedata::ArtDefinition& animationDefinition)
-    : animationDefinition_(animationDefinition) {}
+Simulation::Simulation(const gamedata::ArtDefinition& animationDefinition,
+    const gamedata::VeterancyDatabase* veterancyDatabase)
+    : animationDefinition_(animationDefinition), veterancyDatabase_(veterancyDatabase) {}
 
 Direction8 Simulation::directionFromDelta(float dx, float dy) {
     if (std::abs(dx) < 0.001F && std::abs(dy) < 0.001F) {
@@ -102,15 +103,12 @@ std::uint32_t Simulation::spawn(const gamedata::UnitDefinition& definition, Owne
     entity.occupancyCell = position;
     if (isInfantry(entity)) {
         const auto location = findAvailableSubcell(position, entity.id);
-        if (location.has_value()) {
-            entity.occupancyCell = location->cell;
-            entity.occupancySubcell = location->subcell;
-            entity.position = subcellPosition(entity.occupancyCell, entity.occupancySubcell);
-        } else {
-            // Keep a valid world position if the bounded search is exhausted;
-            // an unassigned entity must never be inserted with a None slot.
-            entity.position = toWorld(position);
+        if (!location.has_value()) {
+            return 0;
         }
+        entity.occupancyCell = location->cell;
+        entity.occupancySubcell = location->subcell;
+        entity.position = subcellPosition(entity.occupancyCell, entity.occupancySubcell);
     } else {
         entity.position = toWorld(position);
     }
@@ -122,6 +120,11 @@ std::uint32_t Simulation::spawn(const gamedata::UnitDefinition& definition, Owne
     entity.weaponDamage = std::max(1, definition.primary.damage);
     entity.autoAcquire = definition.autoAcquire;
     entity.returnFire = definition.returnFire;
+    entity.experienceValue = definition.experienceValue;
+    entity.veterancyProfile = definition.veterancyProfile;
+    entity.veterancyLevel = definition.initialVeterancy;
+    entity.energy = definition.initialEnergy;
+    entity.maxEnergy = definition.maxEnergy;
     if (isInfantry(entity) && entity.occupancySubcell != InfantrySubcell::None) {
         infantryOccupancy_[cellKey(entity.occupancyCell)][static_cast<std::size_t>(entity.occupancySubcell)] = entity.id;
     }
@@ -212,6 +215,7 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
                 entity.weaponCooldown = 25.0F / 30.0F;
                 ++entity.attackEvent;
                 if (!isAlive(*target)) {
+                    awardExperience(entity, *target);
                     target->order = {};
                     target->patrolPoint.reset();
                     target->selected = false;
@@ -394,6 +398,19 @@ void Simulation::issueAttack(std::uint32_t target) {
     applyToSelected({CommandKind::Attack, {}, target}, true);
 }
 
+bool Simulation::eraseEntity(std::uint32_t id) {
+    const auto it = std::find_if(entities_.begin(), entities_.end(), [id](const Entity& entity) {
+        return entity.id == id;
+    });
+    if (it == entities_.end()) {
+        return false;
+    }
+    releaseReservation(*it);
+    releaseOccupancy(*it);
+    entities_.erase(it);
+    return true;
+}
+
 const Entity* Simulation::find(std::uint32_t id) const {
     const auto it = std::find_if(entities_.begin(), entities_.end(), [id](const Entity& entity) {
         return entity.id == id;
@@ -406,6 +423,27 @@ Entity* Simulation::find(std::uint32_t id) {
         return entity.id == id;
     });
     return it == entities_.end() ? nullptr : &*it;
+}
+
+std::uint32_t Simulation::entityAtCell(GridCoord cell) const {
+    for (const Entity& entity : entities_) {
+        if (isAlive(entity) && entity.occupancyCell == cell) {
+            return entity.id;
+        }
+    }
+    return 0;
+}
+
+void Simulation::awardExperience(Entity& attacker, const Entity& target) {
+    ++attacker.killCount;
+    attacker.experience += std::max(0, target.experienceValue);
+    if (veterancyDatabase_ != nullptr) {
+        const gamedata::VeterancyLevelDefinition* current =
+            veterancyDatabase_->level(attacker.veterancyProfile, attacker.experience);
+        if (current != nullptr) {
+            attacker.veterancyLevel = current->id;
+        }
+    }
 }
 
 Entity* Simulation::nearestEnemy(const Entity& source, float maxDistance) {

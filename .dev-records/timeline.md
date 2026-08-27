@@ -161,3 +161,26 @@
 - 复核现有 UI layout/image 分离设计，在 `INI/UI.ini` 增加九个正式面板主题图片映射。
 - 新增并构建复制 `assets/ui/themes/ra2_soviet/hud/*.png` 与 `editor/sandbox.png`；正式面板外壳改由 `renderer.drawImage` 使用这些主题素材。
 - 增加默认主题图片路径回归断言，完成 configure、MSVC compile/link、CTest 和实际 EXE 响应检查；未触碰独立 corpus worktree，未新增 Gameplay 范围。
+
+## 2026-08-27 - PR #2 第二轮 Editor Tools and Unit Status
+
+### 用户目标
+- 从 PR #1 合并后的最新 `origin/main` 建立新分支，继续保持 Draft PR，不修改 main、不混入 corpus worktree。
+- 只实现正式 Editor Tool System 和 Unit Status / Information Panel，使用 E2 作为唯一玩法验证对象。
+
+### 本轮处理
+- 新增 `TerrainDatabase`、`TerrainMap`、`EditorToolState` 和 `EditorToolController`，支持六种工具、Terrain/Unit 类别、Void、笔刷、填充、取色、真实 Simulation 放置/删除和 occupancy 校验。
+- 扩展 Rules 单位注册表、UIName、副名称、护甲/武器卡、经验/军阶和可选护盾/能量数据；新增 `VeterancyDatabase` 与 `UnitStatusViewModel`。
+- 将正式工具窗口和 Unit Status 内容接入现有 UI.ini rect/theme 体系；新增 Terrain.ini、Editor.ini、项目自有工具/卡片图标和第二轮设计文档。
+
+### 范围边界
+- 未新增第二单位、生产、经济、AI、Trigger、多人、真实 MAP/TMP 或复杂 Editor 绘图工具。
+- corpus worktree 仍保持独立，Development Sandbox 继续使用仓库自有 INI/assets。
+
+### 验证计划
+- 重新执行自动发现 VS 的 configure/build、CTest 和真实 EXE 启动；截图作为运行证据，不代替人工视觉/交互验收。
+
+### 最终验证补充
+- 重新 fetch 后 `origin/main` 仍为 `1c077e44399721d7f567993d422c7b507504f90c`；旧 PR #1 分支仍为 `96b9b8493e924db9a612442e84f4691fd6f54ca1`。
+- 官方 `tools/dev/setup.ps1`、`build.ps1` 和 `test.ps1` 完成；MSVC x64、CMake 4.4.2、Ninja 1.13.2、独立 `E:\Tools\vcpkg`，CTest `1/1 PASS`。
+- 最新 `ra2yr_client.exe` 实际启动且未立即退出；日志确认 D3D11/SDL、Rules/Art、CONS.SHP、unittem.pal 和三组 E2 VoiceSet 加载。窗口截图保存在被忽略的 `artifacts/round2-validation/`，只作为运行证据，不宣称人工验收通过。

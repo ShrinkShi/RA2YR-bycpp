@@ -1,6 +1,10 @@
 #include "GameData/Art.h"
 #include "GameData/Rules.h"
+#include "GameData/Terrain.h"
 #include "GameData/UI.h"
+#include "GameData/Veterancy.h"
+#include "Editor/EditorToolController.h"
+#include "Client/Hud/UnitStatusViewModel.h"
 #include "Westwood/Palette/Palette.h"
 #include "Simulation/Simulation.h"
 #include "Westwood/Ini/Ini.h"
@@ -68,6 +72,20 @@ Inviso=yes
     assert(rules.e2().voiceSelect == "E2Select" && rules.e2().voiceMove == "E2Move" &&
         rules.e2().voiceAttack == "E2Attack");
     assert(rules.e2().primary.projectile == "InvisibleLow");
+    assert(rules.e2().name == "动员兵");
+    assert(rules.e2().secondaryName == "苏联步兵");
+    assert(rules.e2().weapons.size() == 1 && rules.e2().weapons.front().uiName == "M1卡宾枪");
+
+    gamedata::TerrainDatabase terrainDatabase;
+    assert(terrainDatabase.load(contentRoot / "INI/Terrain.ini", error));
+    assert(terrainDatabase.find("GRASS") != nullptr);
+    assert(terrainDatabase.find("GRASS")->passable && terrainDatabase.find("GRASS")->buildable);
+    gamedata::VeterancyDatabase veterancy;
+    assert(veterancy.load(rulesPath, error));
+    assert(veterancy.find("Standard") != nullptr);
+    assert(veterancy.level("Standard", 0)->id == "Rookie");
+    assert(veterancy.level("Standard", 50)->id == "Veteran");
+    assert(veterancy.nextLevel("Standard", 50)->id == "Elite");
 
     gamedata::UiLayoutDatabase ui;
     assert(ui.load(contentRoot / "INI/UI.ini", error));
@@ -84,6 +102,8 @@ Inviso=yes
     const Rect commandSlot = ui.childRect("hud.command_card", "hud.command_card.slot.0");
     assert(commandSlot.x == ui.rect("hud.command_card").x + 5.0F);
     assert(commandSlot.y == ui.rect("hud.command_card").y + 28.0F);
+    assert(std::abs(ui.setting("HUD.UnitStatus", "HealthyThreshold") - 0.60F) < 0.001F);
+    assert(std::abs(ui.setting("HUD.UnitStatus", "CriticalThreshold") - 0.30F) < 0.001F);
 
     westwood::IniDocument voices;
     assert(voices.load(contentRoot / "assets/audio/voices.ini", error));
@@ -333,6 +353,66 @@ Inviso=yes
     simulation.update(1.0F);
     assert(simulation.find(blue) == nullptr || simulation.find(blue)->health < initialHealth);
 
+    editor::TerrainMap editorMap(8, 8);
+    editorMap.fill("GRASS");
+    simulation::Simulation editorSimulation(animationDefinition, &veterancy);
+    editor::EditorToolController editorController(editorMap, terrainDatabase, rules, editorSimulation);
+    assert(editorController.loadBrushPresets(contentRoot / "INI/Editor.ini", error));
+    assert(editorController.brushPresets().size() == 7);
+    editorController.state().category = editor::EditorAssetCategory::Terrain;
+    editorController.state().tool = editor::EditorToolId::Pencil;
+    assert(editorController.apply({1, 1}).changed == false);
+    editorController.state().terrainAsset = "GRASS";
+    editorController.state().tool = editor::EditorToolId::Eraser;
+    assert(editorController.apply({1, 1}).changed);
+    assert(!editorMap.cell({1, 1}).exists);
+    editorController.state().tool = editor::EditorToolId::Pencil;
+    editorController.state().terrainAsset = "GRASS";
+    editorController.state().tool = editor::EditorToolId::Eraser;
+    assert(editorController.apply({2, 2}).changed);
+    editorController.state().tool = editor::EditorToolId::Pencil;
+    editorController.beginStroke();
+    assert(editorController.continueStroke({2, 2}).changed);
+    assert(!editorController.continueStroke({2, 2}).changed);
+    editorController.endStroke();
+    editorController.state().terrainAsset = "DIRT";
+    editorController.state().tool = editor::EditorToolId::FillBucket;
+    assert(editorController.apply({0, 0}).changed);
+    assert(editorMap.cell({0, 0}).terrainTypeId == "DIRT");
+    editorController.state().tool = editor::EditorToolId::Brush;
+    editorController.state().brushPreset = 1;
+    assert(editorController.previewCells({4, 4}).size() == 4);
+    editorController.state().category = editor::EditorAssetCategory::Unit;
+    editorController.state().unitAsset = "E2";
+    editorController.state().tool = editor::EditorToolId::Pencil;
+    editorController.state().owner = Owner::Blue;
+    const std::uint32_t placedOne = editorController.apply({4, 4}).changed ?
+        editorSimulation.entityAtCell({4, 4}) : 0;
+    assert(placedOne != 0 && editorSimulation.find(placedOne)->owner == Owner::Blue);
+    const std::uint32_t placedTwo = editorSimulation.spawn(rules.e2(), Owner::Blue, {4, 4});
+    assert(placedTwo != 0 && editorSimulation.find(placedTwo)->position.x !=
+        editorSimulation.find(placedOne)->position.x);
+    editorController.state().tool = editor::EditorToolId::Eraser;
+    assert(editorController.apply({4, 4}, placedOne).changed);
+    assert(editorSimulation.find(placedOne) == nullptr);
+
+    simulation::Entity statusEntity;
+    statusEntity.health = 25;
+    statusEntity.maxHealth = 125;
+    statusEntity.shields = {10, 5};
+    statusEntity.energy = 4;
+    statusEntity.maxEnergy = 10;
+    statusEntity.killCount = 2;
+    statusEntity.veterancyProfile = "Standard";
+    statusEntity.veterancyLevel = "Rookie";
+    gamedata::UnitDefinition statusDefinition = rules.e2();
+    statusDefinition.weapons = {statusDefinition.primary, statusDefinition.primary, statusDefinition.primary};
+    const client::hud::UnitStatusViewModel status = client::hud::UnitStatusViewModelBuilder::build(
+        statusEntity, statusDefinition, rules, veterancy, {});
+    assert(status.displayName == "动员兵" && status.healthBand == client::hud::HealthBand::Critical);
+    assert(status.shields.size() == 2 && status.energy == 4 && status.kills == 2);
+    assert(status.weapons.size() == 3 && status.tags.size() == 2);
+
     gamedata::UnitDefinition alliedDefinition = definition;
     alliedDefinition.id = "S1";
     alliedDefinition.faction = Faction::Allied;
@@ -376,6 +456,22 @@ Inviso=yes
     holdSimulation.update(1.0F);
     assert(holdSimulation.find(holdRed)->position.x == 0.0F);
     assert(holdSimulation.find(holdBlue)->health < holdBlueHealth);
+
+    gamedata::UnitDefinition experienceDefinition = behaviorDefinition;
+    experienceDefinition.strength = 40;
+    experienceDefinition.primary.damage = 40;
+    experienceDefinition.experienceValue = 25;
+    simulation::Simulation experienceSimulation(animationDefinition, &veterancy);
+    const std::uint32_t experienceAttacker = experienceSimulation.spawn(
+        experienceDefinition, Owner::Red, {0, 0});
+    const std::uint32_t experienceTarget = experienceSimulation.spawn(
+        experienceDefinition, Owner::Blue, {3, 0});
+    experienceSimulation.selectEntity(experienceAttacker);
+    experienceSimulation.issueAttack(experienceTarget);
+    experienceSimulation.update(1.0F / 30.0F);
+    assert(experienceSimulation.find(experienceAttacker)->killCount == 1);
+    assert(experienceSimulation.find(experienceAttacker)->experience == 25);
+    assert(experienceSimulation.find(experienceTarget) != nullptr);
 
     gamedata::UnitDefinition returnFireDefinition = behaviorDefinition;
     returnFireDefinition.autoAcquire = false;

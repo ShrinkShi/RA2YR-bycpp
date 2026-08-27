@@ -28,8 +28,20 @@ add_library(ra2yr_core
     src/GameData/Art.h
     src/GameData/Rules.cpp
     src/GameData/Rules.h
+    src/GameData/Terrain.cpp
+    src/GameData/Terrain.h
     src/GameData/UI.cpp
     src/GameData/UI.h
+    src/GameData/Veterancy.cpp
+    src/GameData/Veterancy.h
+    src/Editor/EditorToolController.cpp
+    src/Editor/EditorToolController.h
+    src/Editor/EditorToolState.cpp
+    src/Editor/EditorToolState.h
+    src/Editor/TerrainMap.cpp
+    src/Editor/TerrainMap.h
+    src/Client/Hud/UnitStatusViewModel.cpp
+    src/Client/Hud/UnitStatusViewModel.h
     src/Simulation/Simulation.cpp
     src/Simulation/Simulation.h
 )

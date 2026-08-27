@@ -93,6 +93,17 @@ bool UiLayoutDatabase::load(const std::filesystem::path& path, std::string& erro
         }
         parsedRelativeRects.emplace(key, rectValue);
     }
+    std::unordered_map<std::string, float> parsedSettings;
+    if (document.hasSection("HUD.UnitStatus")) {
+        for (const auto& [key, value] : document.entries("HUD.UnitStatus")) {
+            float parsedValue = 0.0F;
+            if (!parseFloat(value, parsedValue)) {
+                error = "Invalid UI.ini numeric setting in [HUD.UnitStatus] " + key;
+                return false;
+            }
+            parsedSettings.emplace(key, parsedValue);
+        }
+    }
     if (!parsedRects.contains("world.viewport") || !parsedRects.contains("hud.command_card") ||
         !parsedRelativeRects.contains("hud.command_card.slot.0") ||
         !parsedRelativeRects.contains("sandbox.title_bar")) {
@@ -103,6 +114,7 @@ bool UiLayoutDatabase::load(const std::filesystem::path& path, std::string& erro
     theme_ = std::move(parsed);
     rects_ = std::move(parsedRects);
     relativeRects_ = std::move(parsedRelativeRects);
+    settings_ = std::move(parsedSettings);
     loaded_ = true;
     return true;
 }
@@ -140,6 +152,14 @@ std::filesystem::path UiLayoutDatabase::imagePath(std::string_view key,
     }
     const std::filesystem::path path = it->second;
     return path.is_absolute() ? path : contentRoot / path;
+}
+
+float UiLayoutDatabase::setting(std::string_view section, std::string_view key, float fallback) const {
+    if (section != "HUD.UnitStatus") {
+        return fallback;
+    }
+    const auto it = settings_.find(std::string(key));
+    return it == settings_.end() ? fallback : it->second;
 }
 
 } // namespace ra2yr::gamedata

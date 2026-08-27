@@ -156,3 +156,22 @@ Sprite constant buffer 从单色扩展为 16 个 RGBA 项；未来更多 HouseCo
 ### 代价
 
 - 主题图片缺失时当前正式运行会在资源加载阶段明确失败；这避免静默退回线框外壳，并要求每个发布主题完整提供声明的面板素材。
+
+## 2026-08-27 - Editor tools are simulation-facing modules
+
+### 决策
+- Editor 输入通过 `EditorToolController` 修改 `TerrainMap` 或调用 Simulation；main.cpp 只负责窗口事件、坐标转换和绘制协调。
+- Pointer 是唯一不修改世界的工具；Building/Resource 只保留 disabled 类别框架。
+
+### 原因
+- 地形、单位放置、删除和取色需要可测试的领域行为，不能继续把编辑规则散落在 SDL 事件处理器中。
+- Terrain cell 的 `Exists` 与 Simulation occupancy 必须是真实数据状态，不能用 renderer 偏移或视觉占位伪造。
+
+## 2026-08-27 - Unit Status uses a read-only ViewModel
+
+### 决策
+- HUD 只消费 `UnitStatusViewModel`，由 Rules、Simulation、Veterancy 和 PlayerUpgradeState 组合生成。
+- E2 没有 Rules 定义的护盾/能量时不显示伪造值；多武器使用定义数量驱动的 card 列表。
+
+### 原因
+- 保持正式玩家 UI 与调试字段分离，并让后续单位/Mod 可通过数据定义扩展卡片，不把 UI 绑定到 E2 字符串。

@@ -236,6 +236,17 @@ P0 通过后，才会继续加入：
 
 因此当前仓库主要用于研发和兼容性验证，还不建议普通玩家作为成品游戏使用。
 
+### 第二轮开发：Editor Tools and Unit Status
+
+`feature/editor-tools-and-unit-info` 从 PR #1 合并后的 `origin/main` 建立，继续保持不修改 main、不合并 PR 的工作流。本轮只增加：
+
+- 指针、铅笔、橡皮、刷子、油漆桶、取色器六个正式 Editor 工具；
+- 数据驱动 Terrain Registry、Void cell、笔刷、四连通地形填充和 Simulation 单位放置/删除；
+- 基于真实 SHP 预览的 Unit Status ViewModel、HP 分段、击杀/经验/军阶、护甲卡、多武器卡和本地化标签；
+- `INI/Editor.ini`、`INI/Terrain.ini` 以及对应自动测试和工具窗口布局。
+
+本轮仍不实现第二个战斗单位、建筑生产、经济、AI、Trigger、多人、真实 MAP/TMP 或复杂 Editor 绘图工具。详见 [`docs/EDITOR_TOOLS_AND_UNIT_STATUS.md`](./docs/EDITOR_TOOLS_AND_UNIT_STATUS.md)。
+
 ---
 
 ## 系统方向

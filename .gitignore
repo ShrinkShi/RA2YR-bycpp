@@ -3,6 +3,7 @@
 /.idea/
 CMakeUserPresets.json
 /artifacts/manual-validation/
+/artifacts/round2-validation/
 /artifacts/audio.idx
 /artifacts/audio.bag
 /artifacts/audio-source/

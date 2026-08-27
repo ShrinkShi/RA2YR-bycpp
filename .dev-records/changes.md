@@ -124,3 +124,21 @@
 - `tools/dev/build.ps1`：MSVC x64 compile/link PASS。
 - `tools/dev/test.ps1`：CTest `1/1` PASS。
 - 实际启动 `build/windows-vcpkg/ra2yr_client.exe`，进程保持响应；构建目录确认九个主题 PNG 已复制，运行日志确认 SDL/D3D11、Rules/Art、CONS.SHP、unittem.pal 和 VoiceSet 加载。
+
+## 2026-08-27 - PR #2 Editor Tools and Unit Status
+
+### 变更范围
+- 只增加 Editor Tool System 和 Unit Status ViewModel，不新增第二单位、生产、经济、AI、Trigger、多人或真实 MAP/TMP。
+
+### 具体改动
+- 新增数据驱动 Terrain Registry/Map 与六工具编辑控制器；Void、四连通 Fill、笔刷预览、单位真实 spawn/erase 和 Infantry occupancy 均通过正式模块实现。
+- Rules 支持 infantry registry、UIName/SecondaryUIName、多个武器、ArmorDefinition、ExperienceValue、VeterancyProfile、可选 shields/energy 和标签本地化。
+- Simulation 保存击杀/经验/军阶并在正式击杀时更新；HUD 通过 UnitStatusViewModel 读取生命、军阶、护甲、多武器和标签。
+- UI.ini 增加工具窗口 rect、工具图标和 Status 卡片布局；新增 `INI/Terrain.ini`、`INI/Editor.ini` 与项目自有图标资源。
+
+### 验证情况
+- MSVC x64 configure、compile/link 和 CTest 已完成通过；EXE 启动证据在本轮最终验证中补充，自动测试不等同于人工验收。
+
+### 最终验证补充
+- 最新改动重新完成官方 setup/configure、MSVC compile/link 和 CTest `1/1 PASS`；UnitStatus 阈值来自 `UI.ini`，Editor brush presets 来自 `Editor.ini`，武器卡贴图按 Rules weapon registry 动态加载。
+- 实际启动最新 `ra2yr_client.exe` 并采集主菜单、Editor Sandbox、F3 Debug Overlay 窗口证据；截图不替代人工视觉/交互验收。

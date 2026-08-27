@@ -1,5 +1,9 @@
 #include "GameData/Rules.h"
 #include "GameData/Art.h"
+#include "GameData/Terrain.h"
+#include "GameData/Veterancy.h"
+#include "Editor/EditorToolController.h"
+#include "Client/Hud/UnitStatusViewModel.h"
 #include "GameData/UI.h"
 #include "Renderer/D3D11Renderer.h"
 #include "Simulation/Simulation.h"
@@ -93,6 +97,10 @@ struct SandboxPaletteLayout {
     Rect modeLabel;
     Rect selectButton;
     Rect placeButton;
+    std::array<Rect, 6> toolButtons{};
+    std::array<Rect, 4> brushButtons{};
+    Rect assetLabel;
+    Rect veterancyButton;
 };
 
 struct PerformanceTracker {
@@ -423,6 +431,12 @@ public:
         if (!loadRuntimeAssets(error)) {
             return false;
         }
+        if (!terrainDatabase_.load(contentRoot_ / "INI/Terrain.ini", error) ||
+            !veterancy_.load(contentRoot_ / "INI/Rules.ini", error)) {
+            assetError_ = utf8ToWide(error);
+            return false;
+        }
+        terrainMap_.fill("GRASS");
         std::string audioError;
         const std::array<std::pair<AudioCue, std::string>, 3> voiceBindings = {
             std::pair{AudioCue::VoiceSelect, rules_.e2().voiceSelect},
@@ -440,7 +454,11 @@ public:
             error = "Art.ini has no definition for the E2 image " + rules_.e2().image;
             return false;
         }
-        simulation_ = std::make_unique<simulation::Simulation>(*animationDefinition);
+        simulation_ = std::make_unique<simulation::Simulation>(*animationDefinition, &veterancy_);
+        editorTools_ = std::make_unique<editor::EditorToolController>(terrainMap_, terrainDatabase_, rules_, *simulation_);
+        if (!editorTools_->loadBrushPresets(contentRoot_ / "INI/Editor.ini", error)) {
+            return false;
+        }
         // Keep the sample forces inside the initial camera framing so the
         // first editor run visibly demonstrates both owner colors.
         simulation_->spawn(rules_.e2(), Owner::Red, {8, 12});
@@ -469,6 +487,7 @@ public:
             previous = now;
             simulationAccumulator += seconds;
             processEvents();
+            rebuildTerrainIfDirty();
             const auto simulationStart = std::chrono::steady_clock::now();
             if (mode_ == AppMode::EditorSandbox) {
                 updateCamera(static_cast<float>(seconds));
@@ -549,6 +568,8 @@ private:
              {"terrain", L"Terrain"}, {"unit", L"Unit"}, {"object", L"对象"}, {"mode", L"模式"},
              {"select", L"选择"}, {"place", L"放置"}, {"collapse", L"收起"}, {"expand", L"展开"},
              {"sandbox_palette", L"沙盒工具"}, {"category", L"类别"}, {"current_object", L"当前对象"},
+             {"tool_pointer", L"指针"}, {"tool_pencil", L"铅笔"}, {"tool_eraser", L"橡皮"},
+             {"tool_brush", L"刷子"}, {"tool_fill", L"油漆桶"}, {"tool_eyedropper", L"取色器"},
              {"faction_owner", L"所属"}, {"disabled", L"不可用"}, {"command_card", L"命令面板"},
              {"animation_idle", L"待机"}, {"animation_walk", L"行走"}, {"animation_attack", L"攻击"},
             {"animation_death", L"死亡"},
@@ -585,6 +606,8 @@ private:
             "ui.hud.background", "ui.hud.minimap.background", "ui.hud.model.background",
             "ui.hud.unitinfo.background", "ui.hud.portrait.background", "ui.hud.commandcard.background",
             "ui.hud.production.background", "ui.hud.strategic.background", "ui.editor.sandbox.background",
+            "ui.editor.tool.pointer", "ui.editor.tool.pencil", "ui.editor.tool.eraser", "ui.editor.tool.brush",
+            "ui.editor.tool.fill", "ui.editor.tool.eyedropper", "ui.unitstatus.armor",
         };
         for (const std::string& id : imageIds) {
             const std::filesystem::path path = ui_.imagePath(id, contentRoot_);
@@ -599,6 +622,28 @@ private:
                 return false;
             }
         }
+        unitStatusWeaponImageIds_.clear();
+        for (const gamedata::UnitDefinition& unit : rules_.infantry()) {
+            for (const gamedata::WeaponDefinition& weapon : unit.weapons) {
+                const std::string imageId = "ui.unitstatus.weapon." + weapon.id;
+                if (unitStatusWeaponImageIds_.contains(weapon.id)) {
+                    continue;
+                }
+                std::filesystem::path path = ui_.imagePath(imageId, contentRoot_);
+                if (path.empty() && !weapon.icon.empty()) {
+                    path = contentRoot_ / weapon.icon;
+                }
+                if (path.empty()) {
+                    continue;
+                }
+                if (!renderer_.loadTexture(imageId, path, error)) {
+                    assetError_ = utf8ToWide(error);
+                    std::cerr << "[Content][Error] " << error << '\n';
+                    return false;
+                }
+                unitStatusWeaponImageIds_.emplace(weapon.id, imageId);
+            }
+        }
         assetReady_ = true;
         std::cerr << "[Content] Loaded project Rules.ini, Art.ini, CONS.SHP and unittem.pal\n";
         std::cerr << "[Content] Runtime root: " << contentRoot_.string() << '\n';
@@ -607,9 +652,13 @@ private:
 
     bool buildTerrain(std::string& error) {
         std::vector<renderer::TerrainTileVisual> tiles;
-        tiles.reserve(64U * 64U);
-        for (int x = 0; x < 64; ++x) {
-            for (int y = 0; y < 64; ++y) {
+        tiles.reserve(static_cast<std::size_t>(terrainMap_.width() * terrainMap_.height()));
+        for (int x = 0; x < terrainMap_.width(); ++x) {
+            for (int y = 0; y < terrainMap_.height(); ++y) {
+                const editor::TerrainCell& cell = terrainMap_.cell({x, y});
+                if (!cell.exists) {
+                    continue;
+                }
                 const bool alternate = ((x + y) & 1) != 0;
                 tiles.push_back({{static_cast<float>(x), static_cast<float>(y)}, kTileWidth, kTileHeight,
                     alternate ? Color{0.10F, 0.25F, 0.14F, 1.0F} : Color{0.08F, 0.21F, 0.12F, 1.0F},
@@ -618,7 +667,19 @@ private:
         }
         terrainTileCount_ = tiles.size();
         renderer_.buildStaticTerrain(tiles, error);
+        static_cast<void>(terrainMap_.consumeDirty());
         return error.empty();
+    }
+
+    void rebuildTerrainIfDirty() {
+        if (!terrainMap_.consumeDirty()) {
+            return;
+        }
+        std::string error;
+        if (!buildTerrain(error)) {
+            assetError_ = utf8ToWide(error);
+            std::cerr << "[Terrain][Error] " << error << '\n';
+        }
     }
 
     std::wstring T(const std::string& key) const {
@@ -745,6 +806,9 @@ private:
                 if (dragging_) {
                     dragEnd_ = mouse_;
                 }
+                if (editorStroke_ && leftMouseDown_ && inWorld(mouse_)) {
+                    static_cast<void>(editorTools_->continueStroke(screenToGrid(mouse_), unitAt(mouse_)));
+                }
                 break;
             case SDL_EVENT_MOUSE_WHEEL:
                 if (mode_ == AppMode::EditorSandbox && inWorld(mouse_) &&
@@ -806,8 +870,9 @@ private:
         if (key == SDLK_ESCAPE) {
             if (pendingAction_ != PendingAction::None) {
                 pendingAction_ = PendingAction::None;
-            } else if (placing_) {
+            } else if (placing_ || editorTools_->state().editsWorld()) {
                 placing_ = false;
+                editorTools_->state().tool = editor::EditorToolId::Pointer;
             } else {
                 mode_ = AppMode::MainMenu;
             }
@@ -831,13 +896,22 @@ private:
             placingOwner_ = Owner::Red;
             editorTool_ = EditorTool::Unit;
             placing_ = true;
+            editorTools_->state().category = editor::EditorAssetCategory::Unit;
+            editorTools_->state().owner = Owner::Red;
+            editorTools_->state().tool = editor::EditorToolId::Pencil;
         } else if (key == SDLK_B) {
             placingOwner_ = Owner::Blue;
             editorTool_ = EditorTool::Unit;
             placing_ = true;
+            editorTools_->state().category = editor::EditorAssetCategory::Unit;
+            editorTools_->state().owner = Owner::Blue;
+            editorTools_->state().tool = editor::EditorToolId::Pencil;
         } else if (key == SDLK_T) {
             editorTool_ = editorTool_ == EditorTool::Terrain ? EditorTool::Unit : EditorTool::Terrain;
             placing_ = false;
+            editorTools_->state().category = editorTool_ == EditorTool::Terrain ?
+                editor::EditorAssetCategory::Terrain : editor::EditorAssetCategory::Unit;
+            editorTools_->state().tool = editor::EditorToolId::Pointer;
         }
     }
 
@@ -859,6 +933,9 @@ private:
 
     void mouseDown(bool leftButton) {
         lastMouseEvent_ = leftButton ? "LDown" : "RDown";
+        if (leftButton) {
+            leftMouseDown_ = true;
+        }
         if (mode_ == AppMode::MainMenu) {
             if (!leftButton) {
                 return;
@@ -889,11 +966,11 @@ private:
             issueWorldAction(mouse_, pendingAction_);
             return;
         }
-        if (placing_ && inWorld(mouse_)) {
-            if (editorTool_ == EditorTool::Unit) {
-                simulation_->spawn(rules_.e2(), placingOwner_, screenToGrid(mouse_));
-            }
-            placing_ = false;
+        if (editorTools_->state().editsWorld() && inWorld(mouse_)) {
+            editorStroke_ = editorTools_->state().tool == editor::EditorToolId::Pencil ||
+                editorTools_->state().tool == editor::EditorToolId::Brush;
+            editorTools_->beginStroke();
+            static_cast<void>(editorTools_->continueStroke(screenToGrid(mouse_), unitAt(mouse_)));
             return;
         }
         if (inWorld(mouse_)) {
@@ -908,6 +985,7 @@ private:
             return;
         }
         lastMouseEvent_ = "LUp";
+        leftMouseDown_ = false;
         if (mode_ == AppMode::MainMenu) {
             if (pressedMenuButton_ >= 0 && pressedMenuButton_ < static_cast<int>(menuButtons_.size()) &&
                 menuButtons_[pressedMenuButton_].rect.contains(mouse_.x, mouse_.y)) {
@@ -918,6 +996,11 @@ private:
         }
         if (sandboxPaletteDragging_) {
             sandboxPaletteDragging_ = false;
+            return;
+        }
+        if (editorStroke_) {
+            editorTools_->endStroke();
+            editorStroke_ = false;
             return;
         }
         if (!dragging_) {
@@ -987,6 +1070,14 @@ private:
         layout.modeLabel = child("sandbox.mode");
         layout.selectButton = child("sandbox.select");
         layout.placeButton = child("sandbox.place");
+        for (int index = 0; index < 6; ++index) {
+            layout.toolButtons[static_cast<std::size_t>(index)] = child("sandbox.tool." + std::to_string(index));
+        }
+        for (int index = 0; index < 4; ++index) {
+            layout.brushButtons[static_cast<std::size_t>(index)] = child("sandbox.brush." + std::to_string(index));
+        }
+        layout.assetLabel = child("sandbox.asset");
+        layout.veterancyButton = child("sandbox.veterancy");
         return layout;
     }
 
@@ -1010,25 +1101,51 @@ private:
         if (sandboxPaletteCollapsed_) {
             return true;
         }
+        const editor::EditorToolId toolIds[] = {editor::EditorToolId::Pointer,
+            editor::EditorToolId::Pencil, editor::EditorToolId::Eraser, editor::EditorToolId::Brush,
+            editor::EditorToolId::FillBucket, editor::EditorToolId::Eyedropper};
+        for (std::size_t index = 0; index < layout.toolButtons.size(); ++index) {
+            if (layout.toolButtons[index].contains(mouse_.x, mouse_.y)) {
+                editorTools_->state().tool = toolIds[index];
+                editorTools_->state().placing = toolIds[index] != editor::EditorToolId::Pointer;
+                placing_ = editorTools_->state().placing;
+                audio_.play(AudioCue::UIClick);
+                return true;
+            }
+        }
         if (layout.terrainButton.contains(mouse_.x, mouse_.y)) {
             editorTool_ = EditorTool::Terrain;
-            placing_ = false;
+            editorTools_->state().category = editor::EditorAssetCategory::Terrain;
         } else if (layout.unitButton.contains(mouse_.x, mouse_.y)) {
             editorTool_ = EditorTool::Unit;
+            editorTools_->state().category = editor::EditorAssetCategory::Unit;
         } else if (layout.buildingButton.contains(mouse_.x, mouse_.y) ||
             layout.resourceButton.contains(mouse_.x, mouse_.y)) {
-            // Building and resource tools are intentionally disabled in this
-            // slice; the window reserves their future editor slots.
+            return true;
         } else if (layout.redButton.contains(mouse_.x, mouse_.y)) {
             placingOwner_ = Owner::Red;
+            editorTools_->state().owner = Owner::Red;
         } else if (layout.blueButton.contains(mouse_.x, mouse_.y)) {
             placingOwner_ = Owner::Blue;
+            editorTools_->state().owner = Owner::Blue;
         } else if (layout.selectButton.contains(mouse_.x, mouse_.y)) {
             placing_ = false;
+            editorTools_->state().tool = editor::EditorToolId::Pointer;
+            editorTools_->state().placing = false;
         } else if (layout.placeButton.contains(mouse_.x, mouse_.y)) {
             editorTool_ = EditorTool::Unit;
             placing_ = true;
+            editorTools_->state().category = editor::EditorAssetCategory::Unit;
+            editorTools_->state().tool = editor::EditorToolId::Pencil;
+            editorTools_->state().placing = true;
         } else {
+            for (std::size_t index = 0; index < layout.brushButtons.size(); ++index) {
+                if (layout.brushButtons[index].contains(mouse_.x, mouse_.y)) {
+                    editorTools_->state().brushPreset = index;
+                    audio_.play(AudioCue::UIClick);
+                    return true;
+                }
+            }
             return true;
         }
         audio_.play(AudioCue::UIClick);
@@ -1397,6 +1514,19 @@ private:
         drawHudPanel(panel, "ui.hud.minimap.background", T("minimap"));
         const Rect field = ui_.childRect("hud.minimap", "minimap.field");
         renderer_.drawRect(field, {0.025F, 0.10F, 0.065F, 1.0F});
+        const float cellWidth = field.width / static_cast<float>(terrainMap_.width());
+        const float cellHeight = field.height / static_cast<float>(terrainMap_.height());
+        for (int y = 0; y < terrainMap_.height(); ++y) {
+            for (int x = 0; x < terrainMap_.width(); ++x) {
+                if (terrainMap_.cell({x, y}).exists) {
+                    const Color terrainColor = ((x + y) & 1) != 0 ?
+                        Color{0.12F, 0.28F, 0.16F, 1.0F} : Color{0.08F, 0.22F, 0.12F, 1.0F};
+                    renderer_.drawRect({field.x + static_cast<float>(x) * cellWidth,
+                        field.y + static_cast<float>(y) * cellHeight, cellWidth + 1.0F, cellHeight + 1.0F},
+                        terrainColor);
+                }
+            }
+        }
         for (int index = 1; index < 8; ++index) {
             const float x = field.x + field.width * static_cast<float>(index) / 8.0F;
             const float y = field.y + field.height * static_cast<float>(index) / 8.0F;
@@ -1453,7 +1583,7 @@ private:
         const SandboxPaletteLayout layout = sandboxPaletteLayout();
         const Rect palette = layout.window;
         renderer_.drawImage("ui.editor.sandbox.background", palette);
-        renderer_.drawText(T("sandbox_palette"), {palette.x + 12.0F, palette.y + 5.0F, 172.0F, 30.0F}, 18,
+        renderer_.drawText(T("sandbox_palette"), {palette.x + 12.0F, palette.y + 5.0F, 250.0F, 30.0F}, 18,
             {0.65F, 0.88F, 1.0F, 1.0F}, false);
         renderer_.drawText(sandboxPaletteCollapsed_ ? L"+" : L"_", layout.collapseButton, 18,
             {0.80F, 0.90F, 1.0F, 1.0F});
@@ -1472,25 +1602,60 @@ private:
         };
         renderer_.drawText(T("category"), layout.categoryLabel, 13,
             {0.60F, 0.76F, 0.84F, 1.0F}, false);
+        const editor::EditorToolId toolIds[] = {editor::EditorToolId::Pointer,
+            editor::EditorToolId::Pencil, editor::EditorToolId::Eraser, editor::EditorToolId::Brush,
+            editor::EditorToolId::FillBucket, editor::EditorToolId::Eyedropper};
+        const std::string toolImages[] = {"ui.editor.tool.pointer", "ui.editor.tool.pencil",
+            "ui.editor.tool.eraser", "ui.editor.tool.brush", "ui.editor.tool.fill",
+            "ui.editor.tool.eyedropper"};
+        const std::wstring toolLabels[] = {L"指针", L"铅笔", L"橡皮", L"刷子", L"油漆桶", L"取色器"};
+        for (std::size_t index = 0; index < layout.toolButtons.size(); ++index) {
+            const bool active = editorTools_->state().tool == toolIds[index];
+            renderer_.drawImage(toolImages[index], layout.toolButtons[index],
+                active ? Color{1.0F, 0.82F, 0.42F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
+            renderer_.drawText(toolLabels[index], layout.toolButtons[index], 11,
+                active ? Color{1.0F, 0.88F, 0.24F, 1.0F} : Color{0.88F, 0.90F, 0.86F, 1.0F});
+        }
         drawToolButton(layout.terrainButton, T("terrain"),
-            editorTool_ == EditorTool::Terrain);
+            editorTools_->state().category == editor::EditorAssetCategory::Terrain);
         drawToolButton(layout.unitButton, T("unit"),
-            editorTool_ == EditorTool::Unit);
+            editorTools_->state().category == editor::EditorAssetCategory::Unit);
         drawToolButton(layout.buildingButton, T("building"), false, false);
         drawToolButton(layout.resourceButton, L"资源", false, false);
-        renderer_.drawText(T("current_object") + L": E2 " + T("unit_name"),
-            layout.objectLabel, 14,
+        const std::string& currentAsset = editorTools_->state().currentAsset();
+        std::string assetName = currentAsset;
+        if (editorTools_->state().category == editor::EditorAssetCategory::Terrain) {
+            if (const gamedata::TerrainDefinition* definition = terrainDatabase_.find(currentAsset)) {
+                assetName = definition->uiName;
+            }
+        } else if (editorTools_->state().category == editor::EditorAssetCategory::Unit) {
+            if (const gamedata::UnitDefinition* definition = rules_.findUnit(currentAsset)) {
+                assetName = definition->name;
+            }
+        }
+        const std::wstring assetText = utf8ToWide(currentAsset + " / " + assetName);
+        renderer_.drawText(T("current_object") + L": " + assetText, layout.assetLabel, 14,
             {0.92F, 0.84F, 0.34F, 1.0F}, false);
         renderer_.drawText(T("faction_owner") + L":", layout.ownerLabel, 13,
             {0.60F, 0.76F, 0.84F, 1.0F}, false);
         drawToolButton(layout.redButton, T("red"),
-            placingOwner_ == Owner::Red);
+            editorTools_->state().owner == Owner::Red);
         drawToolButton(layout.blueButton, T("blue"),
-            placingOwner_ == Owner::Blue);
+            editorTools_->state().owner == Owner::Blue);
         renderer_.drawText(T("mode") + L":", layout.modeLabel, 13,
             {0.60F, 0.76F, 0.84F, 1.0F}, false);
-        drawToolButton(layout.selectButton, T("select"), !placing_);
-        drawToolButton(layout.placeButton, T("place"), placing_);
+        const auto& presets = editorTools_->brushPresets();
+        renderer_.drawText(L"笔刷", {palette.x + 16.0F, palette.y + 294.0F, 80.0F, 22.0F}, 13,
+            {0.60F, 0.76F, 0.84F, 1.0F}, false);
+        for (std::size_t index = 0; index < layout.brushButtons.size() && index < presets.size(); ++index) {
+            drawToolButton(layout.brushButtons[index], utf8ToWide(presets[index].id),
+                editorTools_->state().brushPreset == index);
+        }
+        drawToolButton(layout.selectButton, T("select"),
+            editorTools_->state().tool == editor::EditorToolId::Pointer);
+        drawToolButton(layout.placeButton, T("place"),
+            editorTools_->state().tool != editor::EditorToolId::Pointer);
+        drawToolButton(layout.veterancyButton, L"军阶", false);
     }
 
     void drawGroundSelectionEllipse(WorldCoord center, float radius, Color color, bool dashed) {
@@ -1639,20 +1804,67 @@ private:
             renderer_.drawText(L"--", portraitViewport, 28, {0.42F, 0.44F, 0.48F, 1.0F});
         }
         if (selected == nullptr) {
-            renderer_.drawText(L"未选择单位", {560.0F, 896.0F, 420.0F, 30.0F}, 22,
+            renderer_.drawText(L"未选择单位", ui_.childRect("hud.info", "hud.status.name"), 22,
                 {1.0F, 0.82F, 0.20F, 1.0F}, false);
         } else {
-            renderer_.drawText(T("unit_name"), {560.0F, 890.0F, 430.0F, 32.0F}, 24,
-                {1.0F, 0.82F, 0.20F, 1.0F}, false);
-            renderer_.drawText(T("owner") + L": " + ownerText(selected->owner), {560.0F, 930.0F, 430.0F, 28.0F}, 18,
-                {0.82F, 0.82F, 0.78F, 1.0F}, false);
-            renderer_.drawText(T("weapon") + L": " + T("weapon_name"), {560.0F, 966.0F, 430.0F, 28.0F}, 18,
-                {0.82F, 0.82F, 0.78F, 1.0F}, false);
-            renderer_.drawText(T("armor") + L": " + T("armor_name"), {560.0F, 1002.0F, 430.0F, 28.0F}, 18,
-                {0.82F, 0.82F, 0.78F, 1.0F}, false);
-            renderer_.drawText(T("health") + L": " + std::to_wstring(selected->health) + L" / " +
-                std::to_wstring(selected->maxHealth), {560.0F, 1038.0F, 430.0F, 28.0F}, 18,
-                {0.36F, 1.0F, 0.36F, 1.0F}, false);
+            const gamedata::UnitDefinition* definition = rules_.findUnit(selected->definitionId);
+            if (definition != nullptr) {
+                const hud::UnitStatusViewModel status = hud::UnitStatusViewModelBuilder::build(
+                    *selected, *definition, rules_, veterancy_, playerUpgrades_,
+                    ui_.setting("HUD.UnitStatus", "HealthyThreshold", 0.60F),
+                    ui_.setting("HUD.UnitStatus", "CriticalThreshold", 0.30F));
+                const Color healthColor = status.healthBand == hud::HealthBand::Healthy ?
+                    Color{0.30F, 1.0F, 0.34F, 1.0F} : status.healthBand == hud::HealthBand::Warning ?
+                    Color{1.0F, 0.84F, 0.18F, 1.0F} : Color{1.0F, 0.20F, 0.12F, 1.0F};
+                renderer_.drawText(utf8ToWide(status.displayName),
+                    ui_.childRect("hud.info", "hud.status.name"), 24,
+                    {1.0F, 0.82F, 0.20F, 1.0F}, false);
+                renderer_.drawText(utf8ToWide(status.secondaryName),
+                    ui_.childRect("hud.info", "hud.status.secondary"), 16,
+                    {0.70F, 0.76F, 0.78F, 1.0F}, false);
+                renderer_.drawText(T("health") + L": " + std::to_wstring(status.health) + L" / " +
+                    std::to_wstring(status.maxHealth), ui_.childRect("hud.info", "hud.status.health"), 19,
+                    healthColor, false);
+                renderer_.drawText(L"击杀 " + std::to_wstring(status.kills) + L"   " +
+                    utf8ToWide(status.veterancyName), ui_.childRect("hud.info", "hud.status.kills"), 15,
+                    {0.92F, 0.86F, 0.36F, 1.0F}, false);
+                std::wstring tags;
+                for (std::size_t index = 0; index < status.tags.size(); ++index) {
+                    if (index != 0) {
+                        tags += L" / ";
+                    }
+                    tags += utf8ToWide(status.tags[index]);
+                }
+                renderer_.drawText(tags, ui_.childRect("hud.info", "hud.status.tags"), 14,
+                    {0.72F, 0.84F, 0.86F, 1.0F}, false);
+                const Rect armorRect = ui_.childRect("hud.info", "hud.status.armor");
+                renderer_.drawImage("ui.unitstatus.armor", armorRect);
+                renderer_.drawText(utf8ToWide(status.armor.uiName), armorRect, 12,
+                    {1.0F, 0.84F, 0.24F, 1.0F});
+                if (armorRect.contains(mouse_.x, mouse_.y)) {
+                    renderer_.drawText(hud::UnitStatusViewModelBuilder::tooltip(status.armor),
+                        {armorRect.x - 10.0F, armorRect.y - 30.0F, 310.0F, 24.0F}, 12,
+                        {1.0F, 0.92F, 0.62F, 1.0F}, false);
+                }
+                for (std::size_t index = 0; index < status.weapons.size() && index < 3U; ++index) {
+                    const Rect weaponRect = ui_.childRect("hud.info", "hud.status.weapon." +
+                        std::to_string(index));
+                    const auto weaponImage = unitStatusWeaponImageIds_.find(status.weapons[index].id);
+                    if (weaponImage != unitStatusWeaponImageIds_.end()) {
+                        renderer_.drawImage(weaponImage->second, weaponRect);
+                    } else {
+                        renderer_.drawImage("ui.hud.button", weaponRect,
+                            {0.55F, 0.55F, 0.58F, 1.0F});
+                    }
+                    renderer_.drawText(utf8ToWide(status.weapons[index].uiName), weaponRect, 12,
+                        {1.0F, 0.84F, 0.24F, 1.0F});
+                    if (weaponRect.contains(mouse_.x, mouse_.y)) {
+                        renderer_.drawText(hud::UnitStatusViewModelBuilder::tooltip(status.weapons[index]),
+                            {weaponRect.x - 80.0F, weaponRect.y - 30.0F, 460.0F, 24.0F}, 12,
+                            {1.0F, 0.92F, 0.62F, 1.0F}, false);
+                    }
+                }
+            }
         }
 
         const Rect card = ui_.rect("hud.command_card");
@@ -1713,12 +1925,18 @@ private:
     renderer::D3D11Renderer renderer_;
     gamedata::RulesDatabase rules_;
     gamedata::ArtDatabase art_;
+    gamedata::TerrainDatabase terrainDatabase_;
+    gamedata::VeterancyDatabase veterancy_;
     gamedata::UiLayoutDatabase ui_;
     westwood::Palette palette_;
     westwood::ShpTsDocument sprite_;
     std::unique_ptr<simulation::Simulation> simulation_;
+    editor::TerrainMap terrainMap_{64, 64};
+    std::unique_ptr<editor::EditorToolController> editorTools_;
+    hud::PlayerUpgradeState playerUpgrades_;
     AudioService audio_;
     std::unordered_map<std::uint32_t, std::uint32_t> seenAttackEvents_;
+    std::unordered_map<std::string, std::string> unitStatusWeaponImageIds_;
     std::unordered_map<std::string, std::wstring> strings_;
     std::wstring assetError_;
     std::wstring toast_;
@@ -1731,6 +1949,8 @@ private:
     bool running_ = true;
     bool assetReady_ = false;
     bool placing_ = false;
+    bool editorStroke_ = false;
+    bool leftMouseDown_ = false;
     bool dragging_ = false;
     bool strategicCollapsed_ = false;
     bool sandboxPaletteVisible_ = true;

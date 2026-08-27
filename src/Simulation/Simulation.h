@@ -3,6 +3,7 @@
 #include "Engine/Core/Types.h"
 #include "GameData/Art.h"
 #include "GameData/Rules.h"
+#include "GameData/Veterancy.h"
 
 #include <array>
 #include <cstdint>
@@ -59,11 +60,20 @@ struct Entity {
     int animationFrame = 0;
     float animationTime = 0.0F;
     std::uint32_t attackEvent = 0;
+    std::uint32_t killCount = 0;
+    int experience = 0;
+    int experienceValue = 0;
+    std::string veterancyProfile;
+    std::string veterancyLevel;
+    std::vector<int> shields;
+    int energy = 0;
+    int maxEnergy = 0;
 };
 
 class Simulation {
 public:
-    explicit Simulation(const gamedata::ArtDefinition& animationDefinition);
+    explicit Simulation(const gamedata::ArtDefinition& animationDefinition,
+        const gamedata::VeterancyDatabase* veterancyDatabase = nullptr);
 
     std::uint32_t spawn(const gamedata::UnitDefinition& definition, Owner owner, GridCoord position);
     void update(float seconds);
@@ -81,11 +91,14 @@ public:
     void issuePatrol(GridCoord destination);
     void issueAttackMove(GridCoord destination);
     void issueAttack(std::uint32_t target);
+    bool eraseEntity(std::uint32_t id);
 
     [[nodiscard]] const std::vector<Entity>& entities() const { return entities_; }
     [[nodiscard]] std::vector<Entity>& entities() { return entities_; }
     [[nodiscard]] const Entity* find(std::uint32_t id) const;
     [[nodiscard]] Entity* find(std::uint32_t id);
+    [[nodiscard]] std::uint32_t entityAtCell(GridCoord cell) const;
+    [[nodiscard]] bool hasUnitAtCell(GridCoord cell) const { return entityAtCell(cell) != 0; }
 
 private:
     struct SubcellLocation {
@@ -108,6 +121,7 @@ private:
         std::uint32_t entityId) const;
     static WorldCoord subcellPosition(GridCoord cell, InfantrySubcell subcell);
     [[nodiscard]] Entity* nearestEnemy(const Entity& source, float maxDistance);
+    void awardExperience(Entity& attacker, const Entity& target);
     [[nodiscard]] const gamedata::AnimationSequence* animationSequence(AnimationState state) const;
     [[nodiscard]] static const char* animationSequenceName(AnimationState state);
     [[nodiscard]] static bool isAlive(const Entity& entity) { return entity.health > 0; }
@@ -116,6 +130,7 @@ private:
     std::vector<Entity> entities_;
     std::map<std::pair<int, int>, std::array<std::uint32_t, 3>> infantryOccupancy_;
     std::uint32_t nextId_ = 1;
+    const gamedata::VeterancyDatabase* veterancyDatabase_ = nullptr;
 };
 
 } // namespace ra2yr::simulation
