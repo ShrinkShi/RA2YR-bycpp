@@ -186,3 +186,16 @@ Sprite constant buffer 从单色扩展为 16 个 RGBA 项；未来更多 HouseCo
 
 ### 原因
 - 保持正式玩家 UI 与调试字段分离，并让后续单位/Mod 可通过数据定义扩展卡片，不把 UI 绑定到 E2 字符串。
+
+## 2026-08-27 - Minimap and Unit Status closeout decisions
+
+### 决策
+
+- Minimap 不再从屏幕 viewport 计算轴对齐 world Rect；使用共享 `IsoMapProjection` 绘制菱形 cell 与相机四角 polygon。
+- Unit Status 的 model/info 是同一个 `hud.unitstatus` 正式 skin parent；动态文字、sprite、card badge 仅作为内容叠加，旧 `hud.model`/`hud.info` image entry 不再参与正式渲染。
+- Sandbox 的可交互控件使用专用 editor skin image ID，按钮和 tab 的绘制继续与既有 parent-relative hitbox 共用 rect。
+
+### 原因
+
+- 共享投影保证平移只改变 viewport polygon 的位置、缩放才改变其面积，并让 Terrain 与 Unit 在同一 minimap 坐标系中对齐。
+- 统一 Unit Status 外框和专用 editor 控件资源让 MOD 可以替换对应主题图片而不依赖旧 DTA 外壳。

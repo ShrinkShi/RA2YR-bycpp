@@ -238,9 +238,13 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
         }
     }
 
+    // For infantry, the reservation is the assigned destination. The command
+    // cell is only the player's request and must not become a second target
+    // after the assigned subcell is committed.
     const WorldCoord destination = movementDestination(entity);
-    const bool hasDestination = orderKind == CommandKind::Move || orderKind == CommandKind::Patrol ||
-        orderKind == CommandKind::AttackMove;
+    const bool destinationAssigned = !isInfantry(entity) ||
+        entity.reservedSubcell != InfantrySubcell::None || entity.order.destination == entity.occupancyCell;
+    const bool hasDestination = movementOrder(orderKind) && destinationAssigned;
     if (!attacking && !moving && (target == nullptr || !isAlive(*target)) && hasDestination &&
         distance(entity.position, destination) > 0.12F) {
         const float dx = destination.x - entity.position.x;
@@ -258,6 +262,12 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
         if (orderKind == CommandKind::Patrol && entity.patrolPoint.has_value()) {
             std::swap(entity.order.destination, *entity.patrolPoint);
             static_cast<void>(reserveDestination(entity, entity.order.destination));
+        } else {
+            // Move and AttackMove finish only after their assigned target has
+            // been committed. Clearing the order prevents reconvergence on
+            // the original click cell on the next simulation tick.
+            entity.order = {};
+            entity.patrolPoint.reset();
         }
     }
 

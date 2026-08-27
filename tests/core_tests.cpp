@@ -11,6 +11,7 @@
 #include "Westwood/Ini/Ini.h"
 #include "Westwood/Shp/Shp.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -18,6 +19,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -93,15 +95,22 @@ Inviso=yes
     gamedata::UiLayoutDatabase ui;
     assert(ui.load(contentRoot / "INI/UI.ini", error));
     assert(ui.theme().skin.name == "ra2_soviet");
-    const std::array<const char*, 9> formalPanelImages = {
-        "ui.hud.background", "ui.hud.minimap.background", "ui.hud.model.background",
-        "ui.hud.unitinfo.background", "ui.hud.portrait.background", "ui.hud.commandcard.background",
-        "ui.hud.production.background", "ui.hud.strategic.background", "ui.editor.sandbox.background",
+    const std::array<const char*, 19> formalPanelImages = {
+        "ui.hud.background", "ui.hud.minimap.background", "ui.hud.unitstatus.background",
+        "ui.hud.portrait.background",
+        "ui.hud.commandcard.background", "ui.hud.production.background", "ui.hud.strategic.background",
+        "ui.editor.sandbox.background", "ui.editor.button.normal", "ui.editor.button.hover",
+        "ui.editor.button.active", "ui.editor.tab.normal", "ui.editor.tab.active",
+        "ui.editor.asset.normal", "ui.editor.asset.hover", "ui.editor.asset.active",
+        "ui.editor.dropdown", "ui.editor.separator", "ui.unitstatus.card",
     };
     for (const char* imageId : formalPanelImages) {
         assert(ui.hasImage(imageId));
         assert(std::filesystem::exists(ui.imagePath(imageId, contentRoot)));
     }
+    assert(ui.rect("hud.unitstatus").width > 600.0F);
+    assert(ui.childRect("hud.unitstatus", "hud.unitstatus.preview").width > 0.0F);
+    assert(ui.relativeRect("hud.unitstatus.card.badge").width > 0.0F);
     const Rect commandSlot = ui.childRect("hud.command_card", "hud.command_card.slot.0");
     assert(commandSlot.x == ui.rect("hud.command_card").x + 5.0F);
     assert(commandSlot.y == ui.rect("hud.command_card").y + 28.0F);
@@ -343,6 +352,26 @@ Inviso=yes
         assert(std::all_of(sixSubcells[cell].begin(), sixSubcells[cell].end(),
             [](bool occupied) { return occupied; }));
     }
+    const auto sixStableLayout = [&sixFormation]() {
+        std::vector<std::tuple<GridCoord, simulation::InfantrySubcell, WorldCoord>> layout;
+        for (const auto& entity : sixFormation.entities()) {
+            layout.emplace_back(entity.occupancyCell, entity.occupancySubcell, entity.position);
+            assert(entity.order.kind == CommandKind::None);
+        }
+        return layout;
+    }();
+    for (int step = 0; step < 300; ++step) {
+        sixFormation.update(1.0F / 60.0F);
+    }
+    for (std::size_t index = 0; index < sixFormation.entities().size(); ++index) {
+        const auto& entity = sixFormation.entities()[index];
+        const auto& stable = sixStableLayout[index];
+        assert(entity.occupancyCell == std::get<0>(stable));
+        assert(entity.occupancySubcell == std::get<1>(stable));
+        assert(std::abs(entity.position.x - std::get<2>(stable).x) < 0.001F);
+        assert(std::abs(entity.position.y - std::get<2>(stable).y) < 0.001F);
+        assert(entity.order.kind == CommandKind::None);
+    }
     // A second command to the same cell must reuse the released slots rather than
     // seeing stale reservations left behind by the first arrival.
     sixFormation.issueMove({8, 8});
@@ -369,6 +398,26 @@ Inviso=yes
         assert(std::all_of(nineSubcells[cell].begin(), nineSubcells[cell].end(),
             [](bool occupied) { return occupied; }));
     }
+    const auto nineStableLayout = [&nineFormation]() {
+        std::vector<std::tuple<GridCoord, simulation::InfantrySubcell, WorldCoord>> layout;
+        for (const auto& entity : nineFormation.entities()) {
+            layout.emplace_back(entity.occupancyCell, entity.occupancySubcell, entity.position);
+            assert(entity.order.kind == CommandKind::None);
+        }
+        return layout;
+    }();
+    for (int step = 0; step < 300; ++step) {
+        nineFormation.update(1.0F / 60.0F);
+    }
+    for (std::size_t index = 0; index < nineFormation.entities().size(); ++index) {
+        const auto& entity = nineFormation.entities()[index];
+        const auto& stable = nineStableLayout[index];
+        assert(entity.occupancyCell == std::get<0>(stable));
+        assert(entity.occupancySubcell == std::get<1>(stable));
+        assert(std::abs(entity.position.x - std::get<2>(stable).x) < 0.001F);
+        assert(std::abs(entity.position.y - std::get<2>(stable).y) < 0.001F);
+        assert(entity.order.kind == CommandKind::None);
+    }
     for (std::size_t first = 0; first < nineFormation.entities().size(); ++first) {
         for (std::size_t second = first + 1; second < nineFormation.entities().size(); ++second) {
             assert(distance(nineFormation.entities()[first].position,
@@ -389,43 +438,59 @@ Inviso=yes
     overrideSimulation.update(0.25F);
     assert(overrideSimulation.find(overrideRed)->position.x > overrideStartX);
 
-    const auto minimapWorldExtents = [](const IsometricCamera& camera) {
+    const Rect minimapField{14.0F, 38.0F, 292.0F, 168.0F};
+    const IsoMapProjection minimapProjection(64.0F, 64.0F, minimapField);
+    const ScreenCoord minimapCenter = minimapProjection.project({32.0F, 32.0F});
+    const ScreenCoord minimapTop = minimapProjection.project({0.0F, 0.0F});
+    const ScreenCoord minimapRight = minimapProjection.project({64.0F, 0.0F});
+    const ScreenCoord minimapBottom = minimapProjection.project({64.0F, 64.0F});
+    const ScreenCoord minimapLeft = minimapProjection.project({0.0F, 64.0F});
+    assert(std::abs(minimapCenter.x - (minimapField.x + minimapField.width * 0.5F)) < 0.001F);
+    assert(std::abs(minimapCenter.y - (minimapField.y + minimapField.height * 0.5F)) < 0.001F);
+    assert(std::abs(minimapTop.x - minimapCenter.x) < 0.001F);
+    assert(std::abs(minimapBottom.x - minimapCenter.x) < 0.001F);
+    assert(std::abs(minimapLeft.y - minimapCenter.y) < 0.001F);
+    assert(std::abs(minimapRight.y - minimapCenter.y) < 0.001F);
+    assert(minimapRight.x > minimapLeft.x && minimapBottom.y > minimapTop.y);
+
+    const auto minimapViewport = [&minimapProjection](const IsometricCamera& camera) {
         constexpr Rect viewport{100.0F, 50.0F, 1390.0F, 780.0F};
-        const ScreenCoord viewportCenter{
-            viewport.x + viewport.width * 0.5F, viewport.y + viewport.height * 0.5F};
-        const WorldCoord center = camera.toWorld(viewportCenter);
-        const WorldCoord corners[] = {
-            camera.toWorld({viewport.x, viewport.y}),
-            camera.toWorld({viewport.x + viewport.width, viewport.y}),
-            camera.toWorld({viewport.x, viewport.y + viewport.height}),
-            camera.toWorld({viewport.x + viewport.width, viewport.y + viewport.height}),
+        const std::array<ScreenCoord, 4> screenCorners = {
+            ScreenCoord{viewport.x, viewport.y},
+            ScreenCoord{viewport.x + viewport.width, viewport.y},
+            ScreenCoord{viewport.x + viewport.width, viewport.y + viewport.height},
+            ScreenCoord{viewport.x, viewport.y + viewport.height},
         };
-        float minX = corners[0].x - center.x;
-        float maxX = minX;
-        float minY = corners[0].y - center.y;
-        float maxY = minY;
-        for (const WorldCoord corner : corners) {
-            minX = std::min(minX, corner.x - center.x);
-            maxX = std::max(maxX, corner.x - center.x);
-            minY = std::min(minY, corner.y - center.y);
-            maxY = std::max(maxY, corner.y - center.y);
+        std::array<ScreenCoord, 4> corners{};
+        for (std::size_t index = 0; index < screenCorners.size(); ++index) {
+            corners[index] = minimapProjection.project(camera.toWorld(screenCorners[index]));
         }
-        return Rect{center.x + minX, center.y + minY, maxX - minX, maxY - minY};
+        return corners;
+    };
+    const auto polygonArea = [](const std::array<ScreenCoord, 4>& polygon) {
+        float area = 0.0F;
+        for (std::size_t index = 0; index < polygon.size(); ++index) {
+            const ScreenCoord first = polygon[index];
+            const ScreenCoord second = polygon[(index + 1U) % polygon.size()];
+            area += first.x * second.y - second.x * first.y;
+        }
+        return std::abs(area) * 0.5F;
     };
     IsometricCamera minimapCamera;
     minimapCamera.viewportCenter = {795.0F, 440.0F};
     minimapCamera.worldCenter = {32.0F, 32.0F};
-    const Rect minimapBeforePan = minimapWorldExtents(minimapCamera);
+    const auto minimapBeforePan = minimapViewport(minimapCamera);
+    const float minimapBeforePanArea = polygonArea(minimapBeforePan);
     minimapCamera.panScreen({160.0F, 90.0F});
-    const Rect minimapAfterPan = minimapWorldExtents(minimapCamera);
-    assert(std::abs(minimapAfterPan.width - minimapBeforePan.width) < 0.001F);
-    assert(std::abs(minimapAfterPan.height - minimapBeforePan.height) < 0.001F);
-    assert(std::abs(minimapAfterPan.x - minimapBeforePan.x) > 0.001F ||
-        std::abs(minimapAfterPan.y - minimapBeforePan.y) > 0.001F);
+    const auto minimapAfterPan = minimapViewport(minimapCamera);
+    assert(std::abs(polygonArea(minimapAfterPan) - minimapBeforePanArea) < 0.1F);
+    assert(std::abs(minimapAfterPan[0].x - minimapBeforePan[0].x) > 0.001F ||
+        std::abs(minimapAfterPan[0].y - minimapBeforePan[0].y) > 0.001F);
     minimapCamera.zoomAt({795.0F, 440.0F}, 1.3F);
-    const Rect minimapAfterZoom = minimapWorldExtents(minimapCamera);
-    assert(minimapAfterZoom.width < minimapAfterPan.width);
-    assert(minimapAfterZoom.height < minimapAfterPan.height);
+    const auto minimapAfterZoom = minimapViewport(minimapCamera);
+    assert(polygonArea(minimapAfterZoom) < polygonArea(minimapAfterPan));
+    const WorldCoord minimapDown = minimapCamera.toWorld({795.0F, 540.0F});
+    assert(minimapProjection.project(minimapDown).y > minimapProjection.project(minimapCamera.worldCenter).y);
 
     simulation.clearSelection();
     simulation.selectSingle({static_cast<int>(moved->position.x), static_cast<int>(moved->position.y)});

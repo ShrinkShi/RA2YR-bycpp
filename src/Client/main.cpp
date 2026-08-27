@@ -615,11 +615,16 @@ private:
         const std::string imageIds[] = {
             "ui.main.background", "ui.main.button", "ui.main.button_hover", "ui.hud.leftbar",
             "ui.hud.rightbar", "ui.hud.button", "ui.hud.button_hover", "ui.hud.tab", "ui.hud.tab_hover",
-            "ui.hud.background", "ui.hud.minimap.background", "ui.hud.model.background",
-            "ui.hud.unitinfo.background", "ui.hud.portrait.background", "ui.hud.commandcard.background",
-            "ui.hud.production.background", "ui.hud.strategic.background", "ui.editor.sandbox.background",
+            "ui.hud.background", "ui.hud.minimap.background", "ui.hud.unitstatus.background",
+            "ui.hud.portrait.background",
+            "ui.hud.commandcard.background", "ui.hud.production.background", "ui.hud.strategic.background",
+            "ui.editor.sandbox.background", "ui.editor.button.normal", "ui.editor.button.hover",
+            "ui.editor.button.active", "ui.editor.tab.normal", "ui.editor.tab.active",
+            "ui.editor.asset.normal", "ui.editor.asset.hover", "ui.editor.asset.active",
+            "ui.editor.dropdown", "ui.editor.separator",
             "ui.editor.tool.pointer", "ui.editor.tool.pencil", "ui.editor.tool.eraser", "ui.editor.tool.brush",
-            "ui.editor.tool.fill", "ui.editor.tool.eyedropper", "ui.unitstatus.armor", "ui.unitstatus.tooltip",
+            "ui.editor.tool.fill", "ui.editor.tool.eyedropper", "ui.unitstatus.armor", "ui.unitstatus.card",
+            "ui.unitstatus.tooltip",
         };
         for (const std::string& id : imageIds) {
             const std::filesystem::path path = ui_.imagePath(id, contentRoot_);
@@ -1057,8 +1062,13 @@ private:
     Rect sandboxPaletteRect() const {
         const Rect configured = ui_.rect("sandbox.window");
         const Rect titleBar = ui_.relativeRect("sandbox.title_bar");
+        float height = configured.height;
+        if (brushPopupVisible_) {
+            const Rect lastOption = ui_.relativeRect("sandbox.brush.option.6");
+            height = std::max(height, lastOption.y + lastOption.height + 12.0F);
+        }
         return {sandboxPalettePosition_.x, sandboxPalettePosition_.y, configured.width,
-            sandboxPaletteCollapsed_ ? titleBar.height : configured.height};
+            sandboxPaletteCollapsed_ ? titleBar.height : height};
     }
 
     SandboxPaletteLayout sandboxPaletteLayout() const {
@@ -1571,66 +1581,56 @@ private:
         drawHudPanel(panel, "ui.hud.minimap.background", T("minimap"));
         const Rect field = ui_.childRect("hud.minimap", "minimap.field");
         renderer_.drawRect(field, {0.025F, 0.10F, 0.065F, 1.0F});
-        const float cellWidth = field.width / static_cast<float>(terrainMap_.width());
-        const float cellHeight = field.height / static_cast<float>(terrainMap_.height());
+        const IsoMapProjection mapProjection(static_cast<float>(terrainMap_.width()),
+            static_cast<float>(terrainMap_.height()), field,
+            IsoProjection{kTileWidth, kTileHeight, {0.0F, 0.0F}});
         for (int y = 0; y < terrainMap_.height(); ++y) {
             for (int x = 0; x < terrainMap_.width(); ++x) {
                 if (terrainMap_.cell({x, y}).exists) {
                     const Color terrainColor = ((x + y) & 1) != 0 ?
                         Color{0.12F, 0.28F, 0.16F, 1.0F} : Color{0.08F, 0.22F, 0.12F, 1.0F};
-                    renderer_.drawRect({field.x + static_cast<float>(x) * cellWidth,
-                        field.y + static_cast<float>(y) * cellHeight, cellWidth + 1.0F, cellHeight + 1.0F},
-                        terrainColor);
+                    const ScreenCoord center = mapProjection.project({static_cast<float>(x) + 0.5F,
+                        static_cast<float>(y) + 0.5F});
+                    const ScreenCoord top = mapProjection.project({static_cast<float>(x) + 0.5F,
+                        static_cast<float>(y)});
+                    const ScreenCoord right = mapProjection.project({static_cast<float>(x) + 1.0F,
+                        static_cast<float>(y) + 0.5F});
+                    const ScreenCoord bottom = mapProjection.project({static_cast<float>(x) + 0.5F,
+                        static_cast<float>(y) + 1.0F});
+                    const ScreenCoord left = mapProjection.project({static_cast<float>(x),
+                        static_cast<float>(y) + 0.5F});
+                    renderer_.drawDiamond(center, right.x - left.x, bottom.y - top.y,
+                        terrainColor, {0.08F, 0.20F, 0.22F, 0.32F});
                 }
             }
-        }
-        for (int index = 1; index < 8; ++index) {
-            const float x = field.x + field.width * static_cast<float>(index) / 8.0F;
-            const float y = field.y + field.height * static_cast<float>(index) / 8.0F;
-            renderer_.drawLine({x, field.y}, {x, field.y + field.height}, {0.08F, 0.20F, 0.22F, 0.7F}, 1.0F);
-            renderer_.drawLine({field.x, y}, {field.x + field.width, y}, {0.08F, 0.20F, 0.22F, 0.7F}, 1.0F);
         }
         for (const auto& entity : simulation_->entities()) {
             if (entity.health <= 0) {
                 continue;
             }
-            const float normalizedX = std::clamp(entity.position.x / 64.0F, 0.0F, 1.0F);
-            const float normalizedY = std::clamp(entity.position.y / 64.0F, 0.0F, 1.0F);
             const Color color = entity.owner == Owner::Red ? Color{1.0F, 0.12F, 0.08F, 1.0F} :
                 Color{0.20F, 0.55F, 1.0F, 1.0F};
-            renderer_.drawRect({field.x + normalizedX * field.width - 4.0F,
-                field.y + normalizedY * field.height - 4.0F, 8.0F, 8.0F}, color);
+            const ScreenCoord position = mapProjection.project(entity.position);
+            renderer_.drawDiamond(position, 6.0F, 3.0F, color, color);
         }
         const Rect viewport = worldViewport();
-        const ScreenCoord viewportCenter{
-            viewport.x + viewport.width * 0.5F,
-            viewport.y + viewport.height * 0.5F};
-        const WorldCoord cameraCenter = camera_.toWorld(viewportCenter);
-        const WorldCoord viewCorners[] = {
-            camera_.toWorld({viewport.x, viewport.y}),
-            camera_.toWorld({viewport.x + viewport.width, viewport.y}),
-            camera_.toWorld({viewport.x, viewport.y + viewport.height}),
-            camera_.toWorld({viewport.x + viewport.width, viewport.y + viewport.height}),
+        const std::array<ScreenCoord, 4> screenCorners = {
+            ScreenCoord{viewport.x, viewport.y},
+            ScreenCoord{viewport.x + viewport.width, viewport.y},
+            ScreenCoord{viewport.x + viewport.width, viewport.y + viewport.height},
+            ScreenCoord{viewport.x, viewport.y + viewport.height},
         };
-        float minRelativeX = viewCorners[0].x - cameraCenter.x;
-        float maxRelativeX = minRelativeX;
-        float minRelativeY = viewCorners[0].y - cameraCenter.y;
-        float maxRelativeY = minRelativeY;
-        for (const WorldCoord corner : viewCorners) {
-            minRelativeX = std::min(minRelativeX, corner.x - cameraCenter.x);
-            maxRelativeX = std::max(maxRelativeX, corner.x - cameraCenter.x);
-            minRelativeY = std::min(minRelativeY, corner.y - cameraCenter.y);
-            maxRelativeY = std::max(maxRelativeY, corner.y - cameraCenter.y);
+        std::array<ScreenCoord, 4> minimapCorners{};
+        for (std::size_t index = 0; index < screenCorners.size(); ++index) {
+            minimapCorners[index] = mapProjection.project(camera_.toWorld(screenCorners[index]));
+            minimapCorners[index].x = std::clamp(minimapCorners[index].x, field.x, field.x + field.width);
+            minimapCorners[index].y = std::clamp(minimapCorners[index].y, field.y, field.y + field.height);
         }
-        const float viewWidth = std::clamp(maxRelativeX - minRelativeX, 0.0F, 64.0F);
-        const float viewHeight = std::clamp(maxRelativeY - minRelativeY, 0.0F, 64.0F);
-        const float mapOriginX = std::clamp(cameraCenter.x + minRelativeX, 0.0F, 64.0F - viewWidth);
-        const float mapOriginY = std::clamp(cameraCenter.y + minRelativeY, 0.0F, 64.0F - viewHeight);
-        const Rect cameraView{field.x + mapOriginX / 64.0F * field.width,
-            field.y + mapOriginY / 64.0F * field.height,
-            std::max(2.0F, viewWidth / 64.0F * field.width),
-            std::max(2.0F, viewHeight / 64.0F * field.height)};
-        renderer_.drawBorder(cameraView, {1.0F, 0.84F, 0.25F, 0.85F}, 2.0F);
+        for (std::size_t index = 0; index < minimapCorners.size(); ++index) {
+            renderer_.drawLine(minimapCorners[index],
+                minimapCorners[(index + 1U) % minimapCorners.size()],
+                {1.0F, 0.84F, 0.25F, 0.90F}, 2.0F);
+        }
     }
 
     void renderSandboxPalette() {
@@ -1641,24 +1641,36 @@ private:
         const Rect palette = layout.window;
         renderer_.drawImage("ui.editor.sandbox.background", palette);
         renderer_.drawText(T("sandbox_palette"), layout.titleBar, 18,
-            {0.65F, 0.88F, 1.0F, 1.0F}, false);
-        renderer_.drawText(sandboxPaletteCollapsed_ ? L"+" : L"_", layout.collapseButton, 18,
-            {0.80F, 0.90F, 1.0F, 1.0F});
-        renderer_.drawText(L"x", layout.closeButton, 18,
-            {1.0F, 0.45F, 0.35F, 1.0F});
+            {1.0F, 0.84F, 0.28F, 1.0F}, false);
+        const auto drawControl = [this](Rect rect, const std::wstring& label, bool active,
+            bool enabled = true) {
+            const bool hovered = enabled && rect.contains(mouse_.x, mouse_.y);
+            const char* image = active ? "ui.editor.button.active" :
+                hovered ? "ui.editor.button.hover" : "ui.editor.button.normal";
+            renderer_.drawImage(image, rect, enabled ? Color{1.0F, 1.0F, 1.0F, 1.0F} :
+                Color{0.42F, 0.44F, 0.46F, 1.0F});
+            if (!label.empty()) {
+                renderer_.drawText(label, rect, 13, enabled ? Color{1.0F, 0.86F, 0.28F, 1.0F} :
+                    Color{0.38F, 0.40F, 0.42F, 1.0F});
+            }
+        };
+        const auto drawTab = [this](Rect rect, const std::wstring& label, bool active,
+            bool enabled = true) {
+            const bool hovered = enabled && rect.contains(mouse_.x, mouse_.y);
+            const char* image = active ? "ui.editor.tab.active" :
+                hovered ? "ui.editor.tab.active" : "ui.editor.tab.normal";
+            renderer_.drawImage(image, rect, enabled ? Color{1.0F, 1.0F, 1.0F, 1.0F} :
+                Color{0.42F, 0.44F, 0.46F, 1.0F});
+            renderer_.drawText(label, rect, 12, enabled ? Color{1.0F, 0.86F, 0.28F, 1.0F} :
+                Color{0.38F, 0.40F, 0.42F, 1.0F});
+        };
+        drawControl(layout.collapseButton, sandboxPaletteCollapsed_ ? L"+" : L"_", false);
+        drawControl(layout.closeButton, L"x", false);
         if (sandboxPaletteCollapsed_) {
             return;
         }
-        const auto drawButton = [this](Rect rect, const std::wstring& label, bool active, bool enabled = true) {
-            renderer_.drawImage(enabled && active ? "ui.hud.button_hover" : "ui.hud.button", rect,
-                enabled ? Color{1.0F, 1.0F, 1.0F, 1.0F} : Color{0.52F, 0.54F, 0.56F, 1.0F});
-            renderer_.drawBorder(rect, enabled && active ? Color{0.95F, 0.76F, 0.20F, 1.0F} :
-                Color{0.24F, 0.40F, 0.52F, 1.0F}, 2.0F);
-            renderer_.drawText(label, rect, 13, enabled ? Color{0.88F, 0.90F, 0.86F, 1.0F} :
-                Color{0.38F, 0.42F, 0.46F, 1.0F});
-        };
         renderer_.drawText(T("tool"), layout.toolLabel, 13,
-            {0.60F, 0.76F, 0.84F, 1.0F}, false);
+            {0.72F, 0.76F, 0.72F, 1.0F}, false);
         const editor::EditorToolId toolIds[] = {editor::EditorToolId::Pointer,
             editor::EditorToolId::Pencil, editor::EditorToolId::Eraser, editor::EditorToolId::Brush,
             editor::EditorToolId::FillBucket, editor::EditorToolId::Eyedropper};
@@ -1669,27 +1681,31 @@ private:
         std::size_t hoveredTool = layout.toolButtons.size();
         for (std::size_t index = 0; index < layout.toolButtons.size(); ++index) {
             const bool active = editorTools_->state().tool == toolIds[index];
+            drawControl(layout.toolButtons[index], L"", active);
             renderer_.drawImage(toolImages[index], layout.toolButtons[index],
                 active ? Color{1.0F, 0.82F, 0.42F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
-            renderer_.drawBorder(layout.toolButtons[index], active ? Color{1.0F, 0.82F, 0.24F, 1.0F} :
-                Color{0.24F, 0.40F, 0.52F, 1.0F}, 2.0F);
             if (layout.toolButtons[index].contains(mouse_.x, mouse_.y)) {
                 hoveredTool = index;
             }
         }
         if (hoveredTool < 6U) {
-            renderer_.drawImage("ui.hud.button_hover", layout.tooltip);
-            renderer_.drawText(toolLabels[hoveredTool], layout.tooltip, 13,
+            Rect tooltip = layout.tooltip;
+            tooltip.x = std::clamp(mouse_.x + 12.0F, palette.x + 8.0F,
+                palette.x + palette.width - tooltip.width - 8.0F);
+            tooltip.y = std::clamp(mouse_.y + 12.0F, palette.y + layout.titleBar.height + 4.0F,
+                palette.y + palette.height - tooltip.height - 4.0F);
+            renderer_.drawImage("ui.editor.button.hover", tooltip);
+            renderer_.drawText(toolLabels[hoveredTool], tooltip, 13,
                 {1.0F, 0.86F, 0.28F, 1.0F}, false);
         }
         renderer_.drawText(T("category"), layout.categoryLabel, 13,
-            {0.60F, 0.76F, 0.84F, 1.0F}, false);
-        drawButton(layout.terrainButton, T("terrain"),
+            {0.72F, 0.76F, 0.72F, 1.0F}, false);
+        drawTab(layout.terrainButton, T("terrain"),
             editorTools_->state().category == editor::EditorAssetCategory::Terrain);
-        drawButton(layout.unitButton, T("unit"),
+        drawTab(layout.unitButton, T("unit"),
             editorTools_->state().category == editor::EditorAssetCategory::Unit);
-        drawButton(layout.buildingButton, T("building"), false, false);
-        drawButton(layout.resourceButton, L"资源", false, false);
+        drawTab(layout.buildingButton, T("building"), false, false);
+        drawTab(layout.resourceButton, L"资源", false, false);
         const std::string& currentAsset = editorTools_->state().currentAsset();
         std::string assetName = currentAsset;
         if (editorTools_->state().category == editor::EditorAssetCategory::Terrain) {
@@ -1705,15 +1721,15 @@ private:
         renderer_.drawText(T("current_object") + L": " + assetText, layout.objectLabel, 14,
             {0.92F, 0.84F, 0.34F, 1.0F}, false);
         const bool terrainCategory = editorTools_->state().category == editor::EditorAssetCategory::Terrain;
-        for (std::size_t index = 0; index < layout.assetCards.size(); ++index) {
+        const std::size_t assetCount = std::min(layout.assetCards.size(), terrainCategory ?
+            terrainDatabase_.definitions().size() : rules_.infantry().size());
+        for (std::size_t index = 0; index < assetCount; ++index) {
             const Rect assetCard = layout.assetCards[index];
+            const bool hovered = assetCard.contains(mouse_.x, mouse_.y);
             bool active = false;
-            bool available = false;
             std::wstring label;
-            drawButton(assetCard, L"", false, false);
             if (terrainCategory && index < terrainDatabase_.definitions().size()) {
                 const auto& definition = terrainDatabase_.definitions()[index];
-                available = true;
                 active = currentAsset == definition.id;
                 label = utf8ToWide(definition.uiName);
                 const auto icon = terrainPaletteImageIds_.find(definition.id);
@@ -1722,7 +1738,6 @@ private:
                 }
             } else if (!terrainCategory && index < rules_.infantry().size()) {
                 const auto& definition = rules_.infantry()[index];
-                available = true;
                 active = currentAsset == definition.id;
                 label = utf8ToWide(definition.name);
                 if (assetReady_) {
@@ -1737,34 +1752,34 @@ private:
                     }
                 }
             }
-            if (available) {
-                renderer_.drawBorder(assetCard, active ? Color{1.0F, 0.80F, 0.22F, 1.0F} :
-                    Color{0.24F, 0.40F, 0.52F, 1.0F}, 2.0F);
-                renderer_.drawText(label, layout.assetLabels[index], 12, {1.0F, 0.86F, 0.24F, 1.0F});
-            } else {
-                renderer_.drawText(L"--", assetCard, 16, {0.38F, 0.42F, 0.46F, 1.0F});
-            }
+            const char* cardImage = active ? "ui.editor.asset.active" :
+                hovered ? "ui.editor.asset.hover" : "ui.editor.asset.normal";
+            renderer_.drawImage(cardImage, assetCard);
+            renderer_.drawText(label, layout.assetLabels[index], 12,
+                {1.0F, 0.86F, 0.24F, 1.0F});
         }
         renderer_.drawText(T("faction_owner") + L":", layout.ownerLabel, 13,
-            {0.60F, 0.76F, 0.84F, 1.0F}, false);
-        drawButton(layout.redButton, T("red"),
+            {0.72F, 0.76F, 0.72F, 1.0F}, false);
+        drawControl(layout.redButton, T("red"),
             editorTools_->state().owner == Owner::Red);
-        drawButton(layout.blueButton, T("blue"),
+        drawControl(layout.blueButton, T("blue"),
             editorTools_->state().owner == Owner::Blue);
         const auto& presets = editorTools_->brushPresets();
-        renderer_.drawText(T("brush"), layout.brushLabel, 13, {0.60F, 0.76F, 0.84F, 1.0F}, false);
+        renderer_.drawText(T("brush"), layout.brushLabel, 13, {0.72F, 0.76F, 0.72F, 1.0F}, false);
         const std::size_t brushIndex = presets.empty() ? 0 : std::min(editorTools_->state().brushPreset,
             presets.size() - 1U);
         const std::wstring brushText = presets.empty() ? L"--" : utf8ToWide(presets[brushIndex].id);
-        drawButton(layout.brushSelector, L"刷子: " + brushText + L"  ▼", !brushPopupVisible_);
+        renderer_.drawImage("ui.editor.dropdown", layout.brushSelector);
+        renderer_.drawText(L"刷子: " + brushText + L"  ▼", layout.brushSelector, 13,
+            {1.0F, 0.86F, 0.28F, 1.0F});
         if (brushPopupVisible_) {
             for (std::size_t index = 0; index < layout.brushOptions.size() && index < presets.size(); ++index) {
-                drawButton(layout.brushOptions[index], utf8ToWide(presets[index].id),
+                drawControl(layout.brushOptions[index], utf8ToWide(presets[index].id),
                     editorTools_->state().brushPreset == index);
             }
         }
-        renderer_.drawText(T("rank") + L":", layout.rankLabel, 13, {0.60F, 0.76F, 0.84F, 1.0F}, false);
-        drawButton(layout.veterancyButton, L"新兵", false, false);
+        renderer_.drawText(T("rank") + L":", layout.rankLabel, 13, {0.72F, 0.76F, 0.72F, 1.0F}, false);
+        drawControl(layout.veterancyButton, L"新兵", false, false);
     }
 
     void drawGroundSelectionEllipse(WorldCoord center, float radius, Color color, bool dashed) {
@@ -1888,23 +1903,23 @@ private:
         const Rect hudBackground = ui_.rect("hud.background");
         renderer_.drawImage("ui.hud.background", hudBackground);
         const Rect miniMap = ui_.rect("hud.minimap");
-        const Rect model = ui_.rect("hud.model");
-        const Rect info = ui_.rect("hud.info");
+        const Rect unitStatus = ui_.rect("hud.unitstatus");
         const Rect portrait = ui_.rect("hud.portrait");
         renderMiniMap(miniMap);
-        drawHudPanel(model, "ui.hud.model.background", T("unit_model"));
-        drawHudPanel(info, "ui.hud.unitinfo.background", T("unit_info"));
+        renderer_.drawImage("ui.hud.unitstatus.background", unitStatus);
         drawHudPanel(portrait, "ui.hud.portrait.background", T("portrait"));
         const auto selected = selectedEntity();
         const auto preview = previewEntity();
-        const Rect modelViewport = ui_.rect("hud.model.viewport");
+        const Rect modelViewport = ui_.childRect("hud.unitstatus", "hud.unitstatus.preview");
         const Rect portraitViewport = ui_.rect("hud.portrait.viewport");
         renderer_.drawRect(modelViewport, {0.005F, 0.008F, 0.012F, 1.0F});
         renderer_.drawRect(portraitViewport, {0.005F, 0.008F, 0.012F, 1.0F});
         if (preview != nullptr && assetReady_) {
             const std::size_t frame = static_cast<std::size_t>(art_.frameIndex(rules_.e2().image,
                 animationSequence(preview->animationState), preview->animationFrame, preview->facing));
-            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner, {436.0F, 1005.0F},
+            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner,
+                {modelViewport.x + modelViewport.width * 0.5F,
+                    modelViewport.y + modelViewport.height * 0.55F},
                 kRenderScale.hudModelScale);
             renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner, {1275.0F, 1005.0F},
                 kRenderScale.hudPortraitScale);
@@ -1913,7 +1928,7 @@ private:
             renderer_.drawText(L"--", portraitViewport, 28, {0.42F, 0.44F, 0.48F, 1.0F});
         }
         if (selected == nullptr) {
-            renderer_.drawText(L"未选择单位", ui_.childRect("hud.info", "hud.status.name"), 22,
+            renderer_.drawText(L"未选择单位", ui_.childRect("hud.unitstatus", "hud.unitstatus.name"), 22,
                 {1.0F, 0.82F, 0.20F, 1.0F}, false);
         } else {
             const gamedata::UnitDefinition* definition = rules_.findUnit(selected->definitionId);
@@ -1926,21 +1941,21 @@ private:
                     Color{0.30F, 1.0F, 0.34F, 1.0F} : status.healthBand == hud::HealthBand::Warning ?
                     Color{1.0F, 0.84F, 0.18F, 1.0F} : Color{1.0F, 0.20F, 0.12F, 1.0F};
                 renderer_.drawText(utf8ToWide(status.displayName),
-                    ui_.childRect("hud.info", "hud.status.name"), 24,
+                    ui_.childRect("hud.unitstatus", "hud.unitstatus.name"), 24,
                     {1.0F, 0.82F, 0.20F, 1.0F}, false);
                 renderer_.drawText(utf8ToWide(status.secondaryName),
-                    ui_.childRect("hud.info", "hud.status.secondary"), 16,
+                    ui_.childRect("hud.unitstatus", "hud.unitstatus.secondary"), 16,
                     {0.70F, 0.76F, 0.78F, 1.0F}, false);
                 renderer_.drawText(L"击杀：" + std::to_wstring(status.kills),
-                    ui_.childRect("hud.info", "hud.status.kills"), 15,
+                    ui_.childRect("hud.unitstatus", "hud.unitstatus.kills"), 15,
                     {0.92F, 0.86F, 0.36F, 1.0F}, false);
                 renderer_.drawText(L"等级：" + utf8ToWide(status.veterancyName),
-                    ui_.childRect("hud.info", "hud.status.veterancy"), 15,
+                    ui_.childRect("hud.unitstatus", "hud.unitstatus.veterancy"), 15,
                     {0.92F, 0.86F, 0.36F, 1.0F}, false);
                 const std::wstring experience = status.nextExperience > 0 ?
                     L"经验：" + std::to_wstring(status.experience) + L" / " +
                     std::to_wstring(status.nextExperience) : L"经验：MAX";
-                renderer_.drawText(experience, ui_.childRect("hud.info", "hud.status.experience"), 14,
+                renderer_.drawText(experience, ui_.childRect("hud.unitstatus", "hud.unitstatus.experience"), 14,
                     {0.72F, 0.84F, 0.86F, 1.0F}, false);
                 std::wstring tags;
                 for (std::size_t index = 0; index < status.tags.size(); ++index) {
@@ -1949,11 +1964,11 @@ private:
                     }
                     tags += utf8ToWide(status.tags[index]);
                 }
-                renderer_.drawText(tags, ui_.childRect("hud.info", "hud.status.tags"), 14,
+                renderer_.drawText(tags, ui_.childRect("hud.unitstatus", "hud.unitstatus.tags"), 14,
                     {0.72F, 0.84F, 0.86F, 1.0F}, false);
 
                 renderer_.drawText(T("health") + L"：" + std::to_wstring(status.health) + L" / " +
-                    std::to_wstring(status.maxHealth), ui_.childRect("hud.model", "hud.status.preview.health"),
+                    std::to_wstring(status.maxHealth), ui_.childRect("hud.unitstatus", "hud.unitstatus.health"),
                     14, healthColor, false);
                 if (!status.shields.empty()) {
                     int totalShield = 0;
@@ -1961,52 +1976,62 @@ private:
                         totalShield += shield.value;
                     }
                     renderer_.drawText(L"护盾：" + std::to_wstring(totalShield),
-                        ui_.childRect("hud.model", "hud.status.preview.shield"), 12,
+                        ui_.childRect("hud.unitstatus", "hud.unitstatus.shield"), 12,
                         {0.38F, 0.78F, 1.0F, 1.0F}, false);
                 }
                 if (status.maxEnergy > 0) {
                     renderer_.drawText(L"能量：" + std::to_wstring(status.energy) + L" / " +
-                        std::to_wstring(status.maxEnergy), ui_.childRect("hud.model", "hud.status.preview.energy"),
+                        std::to_wstring(status.maxEnergy), ui_.childRect("hud.unitstatus", "hud.unitstatus.energy"),
                         12, {0.72F, 0.84F, 0.86F, 1.0F}, false);
                 }
 
-                const Rect cardArea = ui_.childRect("hud.info", "hud.status.card.area");
+                const Rect cardArea = ui_.childRect("hud.unitstatus", "hud.unitstatus.cards");
                 const float cardWidth = ui_.setting("HUD.UnitStatus", "CardWidth", 86.0F);
                 const float cardHeight = ui_.setting("HUD.UnitStatus", "CardHeight", 56.0F);
                 const float cardGap = ui_.setting("HUD.UnitStatus", "CardGap", 6.0F);
-                const float cardLabelHeight = ui_.setting("HUD.UnitStatus", "CardLabelHeight", 18.0F);
                 const int columns = std::max(1, static_cast<int>(std::lround(ui_.setting(
                     "HUD.UnitStatus", "CardColumns", 5.0F))));
+                const Rect iconInset = ui_.relativeRect("hud.unitstatus.card.icon");
+                const Rect badgeInset = ui_.relativeRect("hud.unitstatus.card.badge");
                 std::wstring hoveredTooltip;
                 const auto drawStatusCard = [this, &hoveredTooltip, cardArea, cardWidth, cardHeight, cardGap,
-                    cardLabelHeight, columns](std::size_t index, std::string_view imageId, std::string_view label,
-                    const std::wstring& tooltip) {
+                    columns, iconInset, badgeInset](std::size_t index, std::string_view imageId,
+                    const std::wstring& tooltip, int upgradeLevel) {
                     const int column = static_cast<int>(index % static_cast<std::size_t>(columns));
                     const int row = static_cast<int>(index / static_cast<std::size_t>(columns));
                     const Rect card{cardArea.x + static_cast<float>(column) * (cardWidth + cardGap),
                         cardArea.y + static_cast<float>(row) * (cardHeight + cardGap), cardWidth, cardHeight};
-                    renderer_.drawImage(imageId.empty() ? "ui.hud.button" : imageId, card,
-                        imageId.empty() ? Color{0.55F, 0.55F, 0.58F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
-                    renderer_.drawText(utf8ToWide(label), {card.x, card.y + card.height - cardLabelHeight,
-                        card.width, cardLabelHeight}, 10, {1.0F, 0.84F, 0.24F, 1.0F});
+                    renderer_.drawImage("ui.unitstatus.card", card);
+                    if (!imageId.empty()) {
+                        renderer_.drawImage(imageId, {card.x + iconInset.x, card.y + iconInset.y,
+                            iconInset.width, iconInset.height});
+                    }
+                    const Rect badge{card.x + badgeInset.x, card.y + badgeInset.y,
+                        badgeInset.width, badgeInset.height};
+                    renderer_.drawRect(badge, {0.02F, 0.02F, 0.03F, 0.92F});
+                    renderer_.drawText(std::to_wstring(std::max(0, upgradeLevel)), badge, 10,
+                        {1.0F, 0.84F, 0.24F, 1.0F});
                     if (card.contains(mouse_.x, mouse_.y)) {
                         hoveredTooltip = tooltip;
                     }
                 };
                 const auto armorImage = unitStatusArmorImageIds_.find(status.armor.id);
                 drawStatusCard(0, armorImage == unitStatusArmorImageIds_.end() ? "" : armorImage->second,
-                    status.armor.uiName, hud::UnitStatusViewModelBuilder::tooltip(status.armor));
+                    hud::UnitStatusViewModelBuilder::tooltip(status.armor), status.armor.upgradeLevel);
                 for (std::size_t index = 0; index < status.weapons.size(); ++index) {
                     const auto weaponImage = unitStatusWeaponImageIds_.find(status.weapons[index].id);
                     drawStatusCard(index + 1,
                         weaponImage == unitStatusWeaponImageIds_.end() ? "" : weaponImage->second,
-                        status.weapons[index].uiName, hud::UnitStatusViewModelBuilder::tooltip(status.weapons[index]));
+                        hud::UnitStatusViewModelBuilder::tooltip(status.weapons[index]),
+                        status.weapons[index].upgradeLevel);
                 }
                 if (!hoveredTooltip.empty()) {
-                    const Rect tooltip = ui_.childRect("hud.info", "hud.status.tooltip");
+                    const Rect tooltip = ui_.childRect("hud.unitstatus", "hud.unitstatus.tooltip");
                     renderer_.drawImage("ui.unitstatus.tooltip", tooltip);
+                    const Rect tooltipTextRelative = ui_.relativeRect("hud.unitstatus.tooltip.text");
                     renderer_.drawText(hoveredTooltip,
-                        ui_.childRect("hud.info", "hud.status.tooltip.text"), 13,
+                        {tooltip.x + tooltipTextRelative.x, tooltip.y + tooltipTextRelative.y,
+                            tooltipTextRelative.width, tooltipTextRelative.height}, 13,
                         {1.0F, 0.92F, 0.62F, 1.0F}, false);
                 }
             }

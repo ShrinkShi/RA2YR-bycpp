@@ -155,3 +155,18 @@
 
 - `tools/dev/setup.ps1` configure/generate PASS；MSVC x64 build/link PASS；CTest `1/1 PASS`。
 - EXE 实际启动且保持响应，日志确认 SDL/D3D11、Rules/Art、CONS.SHP、unittem.pal 和 E2 VoiceSet 样本加载。
+
+## 2026-08-27 - 编队完成、Sandbox skin、Unit Status 与 Minimap
+
+### 变更
+
+- Move/AttackMove 在 reservation commit 后清除一次性 order；Patrol 仍在两条腿之间换向并重新 reservation，步兵无已分配 subcell 时不再回退到 requested cell。
+- 增加 6/9 infantry 到达后持续 5 秒的布局稳定性回归测试。
+- Sandbox 使用专用 `editor/{button,tab,asset,dropdown}` 主题资源，紧凑布局只绘制 Terrain/Unit registry 中存在的 asset card；popup 展开高度跟随同一份 parent-relative rect。
+- Unit Status 移除独立 model/info 正式框，使用 `hud.unitstatus.background`，状态卡使用独立主题资源并由配置 inset 放置图标和 upgrade badge。
+- `IsoMapProjection` 复用 `IsoProjection` 的方向基准，Minimap 的地形、单位和相机四角视口都经过同一等距映射。
+
+### 验证
+
+- CMake preset configure/generate PASS；MSVC x64 compile/link PASS；CTest `1/1 PASS`。
+- 实际 `ra2yr_client.exe` 启动保持响应，日志确认 SDL/D3D11、Rules/Art、CONS.SHP、unittem.pal 和 E2 VoiceSet 加载；运行截图位于被忽略的 `artifacts/round5-validation/`。

@@ -39,3 +39,14 @@
 ### 仍需人工确认
 
 - 自动化构建、CTest、进程响应和截图只证明运行证据，不替代用户对框选、编队视觉分离、工具窗口拖动命中、语音听感和 Unit Status 版式的人工验收。
+
+## 2026-08-27 - 本轮问题与处理
+
+### 问题
+
+- 首次直接从普通 PowerShell 增量构建时，虽然缓存记录了 `cl.exe`，但缺少 VS Developer 环境，MSVC 报无法打开 `algorithm`；随后自动发现 `vswhere` 和 `VsDevCmd.bat`，在 x64 Developer 环境重跑。
+- Minimap 回归断言第一版误把 `(32,0)` 当作菱形顶点；修正为 map rectangle 的四个角 `(0,0)/(64,0)/(64,64)/(0,64)`，并保留平移面积稳定、缩放面积变化断言。
+
+### 结果
+
+- 最新 preset configure、MSVC build/link、CTest 和 EXE 启动均已完成；未将普通 shell 的失败误报为源码验证通过。

@@ -12,7 +12,7 @@
 
 Unit 类别通过 Rules infantry registry 选择 Definition，放置调用 Simulation 的真实 spawn 和 Infantry subcell occupancy。选中多个步兵后，Move 会按 EntityId 稳定地把目标 cell 的三个 subcell 填满，再扩展到邻近 cell；reservation 与当前 occupancy 分离，移动途中使用轻量 separation，避免同一目的地挤成一团。橡皮擦直接删除 Entity；油漆桶只作用于 Terrain，使用四连通 flood fill 和 4096 cell 安全上限。所有编辑操作都会返回明确的 blocked/no-op 反馈。
 
-地形注册表在 `INI/Terrain.ini`，编辑器笔刷默认值在 `INI/Editor.ini`。工具栏、资产类别、笔刷和浮窗 rect 均由 `INI/UI.ini` 提供，视觉绘制与命中测试共享同一个 parent-relative rect。
+地形注册表在 `INI/Terrain.ini`，编辑器笔刷默认值在 `INI/Editor.ini`。工具栏、资产类别、笔刷和浮窗 rect 均由 `INI/UI.ini` 提供，视觉绘制与命中测试共享同一个 parent-relative rect。Sandbox 使用独立的 RA2/Soviet 控件皮肤图片；类别使用 tab，资产卡只渲染 registry 中真实存在的对象，popup 展开高度随配置 rect 计算。
 
 ## Unit Status Panel
 
@@ -22,7 +22,7 @@ ViewModel 包含名称、副名称、生命值分段、可选护盾/能量、击
 
 E2 的击杀会由 Simulation 累加 KillCount 和目标的 ExperienceValue，并依照 Rules 的 VeterancyProfile 更新等级标签；本轮只显示状态，不修改战斗属性。
 
-单位模型/头像继续使用真实 CONS.SHP 帧。所有正式 HUD 外壳图片来自 `INI/UI.ini` 的 RA2 Soviet theme；`drawRect` 仅用于动态内容、预览、地图和调试覆盖层。
+单位模型/头像继续使用真实 CONS.SHP 帧。模型、生命/护盾/能量和单位信息共用 `hud.unitstatus` 的统一正式背景，portrait 保持独立面板。所有正式 HUD 外壳图片来自 `INI/UI.ini` 的 RA2 Soviet theme；`drawRect` 仅用于动态内容、预览、地图和调试覆盖层。小地图使用与世界相同的 `IsoProjection` 计算菱形地形、单位和四角相机视口。
 
 ## 验证边界
 

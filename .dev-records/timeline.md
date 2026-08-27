@@ -190,3 +190,10 @@
 - 仅在 canonical checkout `E:\时锐\RA2\RA2YR-bycpp` 继续修复；重新 fetch 后 PR #2 远端 HEAD 为 `e3adeb48ecc001ee477d4cf86e560f1b61a33e02`，`origin/main` 为 `1c077e44399721d7f567993d422c7b507504f90c`。
 - 补齐 Sandbox asset card 的 icon/label parent-relative Rect，修复单位抵达后 stale reservation 未从 reservation map 释放的问题，并增加同目标二次编队回归检查。
 - 重新执行 CMake configure、MSVC build/link、CTest 和实际 EXE 启动；采集主菜单、Editor、F3 occupancy、Unit Status 运行截图，保留为人工复核证据，不宣称人工验收通过。
+
+## 2026-08-27 - PR #2 编队完成与等距 UI 收口
+
+- 在 canonical checkout 继续工作；先核对 PR #2 远端 HEAD 为 `7d8da8ceae8517f57a01979a9dd170e1ed9fe089`，未使用旧 worktree。
+- 修复 Move/AttackMove 抵达后仍使用原始点击格的回退路径；6/9 infantry 回归测试在抵达后继续模拟 5 秒，验证 occupancy/subcell/position/order 稳定。
+- Sandbox 改用紧凑 RA2/Soviet 控件皮肤、tab 和真实资产卡；Unit Status 使用统一 `hud.unitstatus` 外框；Minimap 改为共享等距菱形投影和四角相机视口多边形。
+- preset configure、自动发现 VS Developer 环境下的 MSVC build/link、CTest 和实际 EXE 启动均完成；截图只作为运行证据，不代替用户人工验收。
