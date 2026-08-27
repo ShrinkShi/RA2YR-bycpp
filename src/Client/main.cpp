@@ -9,6 +9,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -70,6 +71,25 @@ struct MenuButton {
     std::string image;
     std::string hoverImage;
     Rect rect;
+};
+
+struct SandboxPaletteLayout {
+    Rect window;
+    Rect titleBar;
+    Rect collapseButton;
+    Rect closeButton;
+    Rect categoryLabel;
+    Rect terrainButton;
+    Rect unitButton;
+    Rect buildingButton;
+    Rect resourceButton;
+    Rect objectLabel;
+    Rect ownerLabel;
+    Rect redButton;
+    Rect blueButton;
+    Rect modeLabel;
+    Rect selectButton;
+    Rect placeButton;
 };
 
 struct PerformanceTracker {
@@ -559,8 +579,24 @@ private:
         return kWorldViewport.contains(position.x, position.y);
     }
 
+    Rect selectionRect() const {
+        return {std::min(dragStart_.x, dragEnd_.x), std::min(dragStart_.y, dragEnd_.y),
+            std::abs(dragEnd_.x - dragStart_.x), std::abs(dragEnd_.y - dragStart_.y)};
+    }
+
+    void selectScreenBox() {
+        const Rect selection = selectionRect();
+        const std::array<WorldCoord, 4> corners = {
+            screenToWorld({selection.x, selection.y}),
+            screenToWorld({selection.x + selection.width, selection.y}),
+            screenToWorld({selection.x + selection.width, selection.y + selection.height}),
+            screenToWorld({selection.x, selection.y + selection.height}),
+        };
+        simulation_->selectBox(corners);
+    }
+
     void updateCamera(float seconds) {
-        if (!inWorld(mouse_) || sandboxPaletteDragging_ ||
+        if (!inWorld(mouse_) || dragging_ || sandboxPaletteDragging_ ||
             (sandboxPaletteVisible_ && sandboxPaletteRect().contains(mouse_.x, mouse_.y))) {
             return;
         }
@@ -750,6 +786,7 @@ private:
     }
 
     void mouseDown(bool leftButton) {
+        lastMouseEvent_ = leftButton ? "LDown" : "RDown";
         if (mode_ == AppMode::MainMenu) {
             if (!leftButton) {
                 return;
@@ -798,6 +835,7 @@ private:
         if (!leftButton) {
             return;
         }
+        lastMouseEvent_ = "LUp";
         if (mode_ == AppMode::MainMenu) {
             if (pressedMenuButton_ >= 0 && pressedMenuButton_ < static_cast<int>(menuButtons_.size()) &&
                 menuButtons_[pressedMenuButton_].rect.contains(mouse_.x, mouse_.y)) {
@@ -813,10 +851,16 @@ private:
         if (!dragging_) {
             return;
         }
+        // Button-up coordinates are authoritative when the final motion event
+        // was coalesced by SDL or the window manager.
+        dragEnd_ = mouse_;
         dragging_ = false;
-        const float dragDistance = std::abs(dragEnd_.x - dragStart_.x) + std::abs(dragEnd_.y - dragStart_.y);
+        const float dragDistance = std::hypot(dragEnd_.x - dragStart_.x, dragEnd_.y - dragStart_.y);
         if (dragDistance > 8.0F) {
-            simulation_->selectBox(screenToWorld(dragStart_), screenToWorld(dragEnd_));
+            selectScreenBox();
+            if (selectedEntity() != nullptr) {
+                audio_.play(AudioCue::VoiceSelect);
+            }
         } else if (inWorld(mouse_)) {
             const std::uint32_t unit = unitAt(mouse_);
             if (unit != 0) {
@@ -846,22 +890,41 @@ private:
             sandboxPaletteCollapsed_ ? 42.0F : 328.0F};
     }
 
+    SandboxPaletteLayout sandboxPaletteLayout() const {
+        const Rect palette = sandboxPaletteRect();
+        SandboxPaletteLayout layout;
+        layout.window = palette;
+        layout.titleBar = {palette.x, palette.y, palette.width, 42.0F};
+        layout.collapseButton = {palette.x + palette.width - 76.0F, palette.y + 7.0F, 30.0F, 28.0F};
+        layout.closeButton = {palette.x + palette.width - 38.0F, palette.y + 7.0F, 30.0F, 28.0F};
+        layout.categoryLabel = {palette.x + 16.0F, palette.y + 48.0F, 100.0F, 22.0F};
+        layout.terrainButton = {palette.x + 16.0F, palette.y + 74.0F, 126.0F, 38.0F};
+        layout.unitButton = {palette.x + 158.0F, palette.y + 74.0F, 126.0F, 38.0F};
+        layout.buildingButton = {palette.x + 16.0F, palette.y + 122.0F, 126.0F, 38.0F};
+        layout.resourceButton = {palette.x + 158.0F, palette.y + 122.0F, 126.0F, 38.0F};
+        layout.objectLabel = {palette.x + 16.0F, palette.y + 166.0F, 268.0F, 26.0F};
+        layout.ownerLabel = {palette.x + 16.0F, palette.y + 202.0F, 80.0F, 22.0F};
+        layout.redButton = {palette.x + 16.0F, palette.y + 222.0F, 126.0F, 38.0F};
+        layout.blueButton = {palette.x + 158.0F, palette.y + 222.0F, 126.0F, 38.0F};
+        layout.modeLabel = {palette.x + 16.0F, palette.y + 270.0F, 80.0F, 22.0F};
+        layout.selectButton = {palette.x + 16.0F, palette.y + 286.0F, 126.0F, 34.0F};
+        layout.placeButton = {palette.x + 158.0F, palette.y + 286.0F, 126.0F, 34.0F};
+        return layout;
+    }
+
     bool handleSandboxPaletteClick() {
-        if (!sandboxPaletteVisible_ || !sandboxPaletteRect().contains(mouse_.x, mouse_.y)) {
+        const SandboxPaletteLayout layout = sandboxPaletteLayout();
+        if (!sandboxPaletteVisible_ || !layout.window.contains(mouse_.x, mouse_.y)) {
             return false;
         }
-        const Rect palette = sandboxPaletteRect();
-        const Rect header{palette.x, palette.y, palette.width, 42.0F};
-        if (header.contains(mouse_.x, mouse_.y)) {
-            const Rect collapse{palette.x + palette.width - 76.0F, palette.y + 7.0F, 30.0F, 28.0F};
-            const Rect close{palette.x + palette.width - 38.0F, palette.y + 7.0F, 30.0F, 28.0F};
-            if (close.contains(mouse_.x, mouse_.y)) {
+        if (layout.titleBar.contains(mouse_.x, mouse_.y)) {
+            if (layout.closeButton.contains(mouse_.x, mouse_.y)) {
                 sandboxPaletteVisible_ = false;
-            } else if (collapse.contains(mouse_.x, mouse_.y)) {
+            } else if (layout.collapseButton.contains(mouse_.x, mouse_.y)) {
                 sandboxPaletteCollapsed_ = !sandboxPaletteCollapsed_;
             } else {
                 sandboxPaletteDragging_ = true;
-                sandboxPaletteDragOffset_ = {mouse_.x - palette.x, mouse_.y - palette.y};
+                sandboxPaletteDragOffset_ = {mouse_.x - layout.window.x, mouse_.y - layout.window.y};
             }
             audio_.play(AudioCue::UIClick);
             return true;
@@ -869,24 +932,22 @@ private:
         if (sandboxPaletteCollapsed_) {
             return true;
         }
-        const Rect terrain{palette.x + 16.0F, palette.y + 74.0F, 126.0F, 38.0F};
-        const Rect unit{palette.x + 158.0F, palette.y + 74.0F, 126.0F, 38.0F};
-        if (terrain.contains(mouse_.x, mouse_.y)) {
+        if (layout.terrainButton.contains(mouse_.x, mouse_.y)) {
             editorTool_ = EditorTool::Terrain;
             placing_ = false;
-        } else if (unit.contains(mouse_.x, mouse_.y)) {
+        } else if (layout.unitButton.contains(mouse_.x, mouse_.y)) {
             editorTool_ = EditorTool::Unit;
-        } else if (Rect{palette.x + 16.0F, palette.y + 122.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y) ||
-            Rect{palette.x + 158.0F, palette.y + 122.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+        } else if (layout.buildingButton.contains(mouse_.x, mouse_.y) ||
+            layout.resourceButton.contains(mouse_.x, mouse_.y)) {
             // Building and resource tools are intentionally disabled in this
             // slice; the window reserves their future editor slots.
-        } else if (Rect{palette.x + 16.0F, palette.y + 180.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+        } else if (layout.redButton.contains(mouse_.x, mouse_.y)) {
             placingOwner_ = Owner::Red;
-        } else if (Rect{palette.x + 158.0F, palette.y + 180.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+        } else if (layout.blueButton.contains(mouse_.x, mouse_.y)) {
             placingOwner_ = Owner::Blue;
-        } else if (Rect{palette.x + 16.0F, palette.y + 238.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+        } else if (layout.selectButton.contains(mouse_.x, mouse_.y)) {
             placing_ = false;
-        } else if (Rect{palette.x + 158.0F, palette.y + 238.0F, 126.0F, 38.0F}.contains(mouse_.x, mouse_.y)) {
+        } else if (layout.placeButton.contains(mouse_.x, mouse_.y)) {
             editorTool_ = EditorTool::Unit;
             placing_ = true;
         } else {
@@ -1015,6 +1076,16 @@ private:
         return false;
     }
 
+    std::size_t selectedCount() const {
+        std::size_t count = 0;
+        for (const auto& entity : simulation_->entities()) {
+            if (entity.selected && entity.health > 0) {
+                ++count;
+            }
+        }
+        return count;
+    }
+
     bool isEnemyTarget(std::uint32_t target) const {
         const auto* candidate = simulation_->find(target);
         if (candidate == nullptr || candidate->health <= 0) {
@@ -1040,9 +1111,16 @@ private:
                 rules_.e2().image, animationSequence(entity.animationState), entity.animationFrame, entity.facing));
             const Rect bounds = renderer_.spriteBounds(rules_.e2().image, frameIndex, unitPosition,
                 kRenderScale.unitVisualScale * camera_.zoom);
-            const float expanded = 6.0F * camera_.zoom;
-            const Rect hitBounds{bounds.x - expanded, bounds.y - expanded,
-                bounds.width + expanded * 2.0F, bounds.height + expanded * 2.0F};
+            // Use the visible SHP footprint, not the ground anchor, for hit
+            // testing. Infantry pivots can be offset substantially from the
+            // ground point; centering the hit box on the anchor made clicks
+            // on the rendered body miss while still affecting nearby ground.
+            const float hitWidth = std::clamp(bounds.width * 0.85F,
+                18.0F * camera_.zoom, 42.0F * camera_.zoom);
+            const float hitHeight = std::clamp(bounds.height * 0.85F,
+                24.0F * camera_.zoom, 72.0F * camera_.zoom);
+            const Rect hitBounds{bounds.x + (bounds.width - hitWidth) * 0.5F,
+                bounds.y + (bounds.height - hitHeight) * 0.5F, hitWidth, hitHeight};
             if (hitBounds.contains(position.x, position.y)) {
                 const float candidate = std::abs(unitPosition.x - position.x) +
                     std::abs(unitPosition.y - position.y);
@@ -1199,7 +1277,10 @@ private:
             {0.90F, 0.72F, 0.38F, 1.0F}, false);
         renderer_.drawText(L"MOUSE " + std::to_wstring(static_cast<int>(mouse_.x)) + L"," +
             std::to_wstring(static_cast<int>(mouse_.y)) + L"   SELECTED " +
-            std::to_wstring(selectedEntity() != nullptr ? 1 : 0), {42.0F, 284.0F, 660.0F, 24.0F}, 14,
+            std::to_wstring(selectedCount()), {42.0F, 284.0F, 660.0F, 24.0F}, 14,
+            {0.72F, 0.90F, 0.80F, 1.0F}, false);
+        renderer_.drawText(L"MOUSE EVENT " + utf8ToWide(lastMouseEvent_) + L"   DRAG " +
+            std::wstring(dragging_ ? L"ON" : L"OFF"), {42.0F, 336.0F, 660.0F, 24.0F}, 14,
             {0.72F, 0.90F, 0.80F, 1.0F}, false);
         renderer_.drawText(L"8-DIRECTION TEST [F6] " + std::wstring(directionTestMode_ ? L"ON" : L"OFF") +
             L"   NEXT " + directionLabel(static_cast<Direction8>(directionTestIndex_)),
@@ -1251,28 +1332,34 @@ private:
             renderer_.drawRect({field.x + normalizedX * field.width - 4.0F,
                 field.y + normalizedY * field.height - 4.0F, 8.0F, 8.0F}, color);
         }
+        const ScreenCoord viewportCenter{
+            kWorldViewport.x + kWorldViewport.width * 0.5F,
+            kWorldViewport.y + kWorldViewport.height * 0.5F};
+        const WorldCoord cameraCenter = camera_.toWorld(viewportCenter);
         const WorldCoord viewCorners[] = {
             camera_.toWorld({kWorldViewport.x, kWorldViewport.y}),
             camera_.toWorld({kWorldViewport.x + kWorldViewport.width, kWorldViewport.y}),
             camera_.toWorld({kWorldViewport.x, kWorldViewport.y + kWorldViewport.height}),
             camera_.toWorld({kWorldViewport.x + kWorldViewport.width, kWorldViewport.y + kWorldViewport.height}),
         };
-        float minX = viewCorners[0].x;
-        float maxX = viewCorners[0].x;
-        float minY = viewCorners[0].y;
-        float maxY = viewCorners[0].y;
+        float minRelativeX = viewCorners[0].x - cameraCenter.x;
+        float maxRelativeX = minRelativeX;
+        float minRelativeY = viewCorners[0].y - cameraCenter.y;
+        float maxRelativeY = minRelativeY;
         for (const WorldCoord corner : viewCorners) {
-            minX = std::min(minX, corner.x);
-            maxX = std::max(maxX, corner.x);
-            minY = std::min(minY, corner.y);
-            maxY = std::max(maxY, corner.y);
+            minRelativeX = std::min(minRelativeX, corner.x - cameraCenter.x);
+            maxRelativeX = std::max(maxRelativeX, corner.x - cameraCenter.x);
+            minRelativeY = std::min(minRelativeY, corner.y - cameraCenter.y);
+            maxRelativeY = std::max(maxRelativeY, corner.y - cameraCenter.y);
         }
-        const Rect cameraView{field.x + std::clamp(minX / 64.0F, 0.0F, 1.0F) * field.width,
-            field.y + std::clamp(minY / 64.0F, 0.0F, 1.0F) * field.height,
-            std::max(2.0F, (std::clamp(maxX / 64.0F, 0.0F, 1.0F) -
-                std::clamp(minX / 64.0F, 0.0F, 1.0F)) * field.width),
-            std::max(2.0F, (std::clamp(maxY / 64.0F, 0.0F, 1.0F) -
-                std::clamp(minY / 64.0F, 0.0F, 1.0F)) * field.height)};
+        const float viewWidth = std::clamp(maxRelativeX - minRelativeX, 0.0F, 64.0F);
+        const float viewHeight = std::clamp(maxRelativeY - minRelativeY, 0.0F, 64.0F);
+        const float mapOriginX = std::clamp(cameraCenter.x + minRelativeX, 0.0F, 64.0F - viewWidth);
+        const float mapOriginY = std::clamp(cameraCenter.y + minRelativeY, 0.0F, 64.0F - viewHeight);
+        const Rect cameraView{field.x + mapOriginX / 64.0F * field.width,
+            field.y + mapOriginY / 64.0F * field.height,
+            std::max(2.0F, viewWidth / 64.0F * field.width),
+            std::max(2.0F, viewHeight / 64.0F * field.height)};
         renderer_.drawBorder(cameraView, {1.0F, 0.84F, 0.25F, 0.85F}, 2.0F);
     }
 
@@ -1280,15 +1367,15 @@ private:
         if (!sandboxPaletteVisible_) {
             return;
         }
-        const Rect palette = sandboxPaletteRect();
+        const SandboxPaletteLayout layout = sandboxPaletteLayout();
+        const Rect palette = layout.window;
         renderer_.drawRect(palette, {0.015F, 0.035F, 0.060F, 0.97F});
         renderer_.drawBorder(palette, {0.24F, 0.62F, 0.86F, 1.0F}, 3.0F);
         renderer_.drawText(T("sandbox_palette"), {palette.x + 12.0F, palette.y + 5.0F, 172.0F, 30.0F}, 18,
             {0.65F, 0.88F, 1.0F, 1.0F}, false);
-        renderer_.drawText(sandboxPaletteCollapsed_ ? L"+" : L"_",
-            {palette.x + palette.width - 76.0F, palette.y + 7.0F, 30.0F, 28.0F}, 18,
+        renderer_.drawText(sandboxPaletteCollapsed_ ? L"+" : L"_", layout.collapseButton, 18,
             {0.80F, 0.90F, 1.0F, 1.0F});
-        renderer_.drawText(L"x", {palette.x + palette.width - 38.0F, palette.y + 7.0F, 30.0F, 28.0F}, 18,
+        renderer_.drawText(L"x", layout.closeButton, 18,
             {1.0F, 0.45F, 0.35F, 1.0F});
         if (sandboxPaletteCollapsed_) {
             return;
@@ -1301,27 +1388,27 @@ private:
             renderer_.drawText(label, rect, 14, enabled ? Color{0.88F, 0.90F, 0.86F, 1.0F} :
                 Color{0.38F, 0.42F, 0.46F, 1.0F});
         };
-        renderer_.drawText(T("category"), {palette.x + 16.0F, palette.y + 48.0F, 100.0F, 22.0F}, 13,
+        renderer_.drawText(T("category"), layout.categoryLabel, 13,
             {0.60F, 0.76F, 0.84F, 1.0F}, false);
-        drawToolButton({palette.x + 16.0F, palette.y + 74.0F, 126.0F, 38.0F}, T("terrain"),
+        drawToolButton(layout.terrainButton, T("terrain"),
             editorTool_ == EditorTool::Terrain);
-        drawToolButton({palette.x + 158.0F, palette.y + 74.0F, 126.0F, 38.0F}, T("unit"),
+        drawToolButton(layout.unitButton, T("unit"),
             editorTool_ == EditorTool::Unit);
-        drawToolButton({palette.x + 16.0F, palette.y + 122.0F, 126.0F, 38.0F}, T("building"), false, false);
-        drawToolButton({palette.x + 158.0F, palette.y + 122.0F, 126.0F, 38.0F}, L"资源", false, false);
+        drawToolButton(layout.buildingButton, T("building"), false, false);
+        drawToolButton(layout.resourceButton, L"资源", false, false);
         renderer_.drawText(T("current_object") + L": E2 " + T("unit_name"),
-            {palette.x + 16.0F, palette.y + 166.0F, 268.0F, 26.0F}, 14,
+            layout.objectLabel, 14,
             {0.92F, 0.84F, 0.34F, 1.0F}, false);
-        renderer_.drawText(T("faction_owner") + L":", {palette.x + 16.0F, palette.y + 202.0F, 80.0F, 22.0F}, 13,
+        renderer_.drawText(T("faction_owner") + L":", layout.ownerLabel, 13,
             {0.60F, 0.76F, 0.84F, 1.0F}, false);
-        drawToolButton({palette.x + 16.0F, palette.y + 222.0F, 126.0F, 38.0F}, T("red"),
+        drawToolButton(layout.redButton, T("red"),
             placingOwner_ == Owner::Red);
-        drawToolButton({palette.x + 158.0F, palette.y + 222.0F, 126.0F, 38.0F}, T("blue"),
+        drawToolButton(layout.blueButton, T("blue"),
             placingOwner_ == Owner::Blue);
-        renderer_.drawText(T("mode") + L":", {palette.x + 16.0F, palette.y + 270.0F, 80.0F, 22.0F}, 13,
+        renderer_.drawText(T("mode") + L":", layout.modeLabel, 13,
             {0.60F, 0.76F, 0.84F, 1.0F}, false);
-        drawToolButton({palette.x + 16.0F, palette.y + 286.0F, 126.0F, 34.0F}, T("select"), !placing_);
-        drawToolButton({palette.x + 158.0F, palette.y + 286.0F, 126.0F, 34.0F}, T("place"), placing_);
+        drawToolButton(layout.selectButton, T("select"), !placing_);
+        drawToolButton(layout.placeButton, T("place"), placing_);
     }
 
     void renderEditor() {
@@ -1339,14 +1426,22 @@ private:
                 continue;
             }
             const ScreenCoord position = gridToScreen(entity.position);
+            const std::size_t frameIndex = static_cast<std::size_t>(art_.frameIndex(
+                rules_.e2().image, animationSequence(entity.animationState), entity.animationFrame,
+                entity.facing));
+            const bool previewed = dragging_ && selectionRect().contains(position.x, position.y);
             if (assetReady_) {
-                renderer_.drawSprite(rules_.e2().image, "unittem", static_cast<std::size_t>(art_.frameIndex(
-                    rules_.e2().image, animationSequence(entity.animationState), entity.animationFrame,
-                    entity.facing)), entity.owner, position, kRenderScale.unitVisualScale * camera_.zoom);
+                renderer_.drawSprite(rules_.e2().image, "unittem", frameIndex, entity.owner, position,
+                    kRenderScale.unitVisualScale * camera_.zoom);
             }
-            if (entity.selected) {
-                renderer_.drawDiamond(position, 38.0F * camera_.zoom, 14.0F * camera_.zoom,
-                    {0.12F, 0.08F, 0.01F, 0.10F}, {0.95F, 0.85F, 0.25F, 1.0F});
+            const Rect spriteBounds = renderer_.spriteBounds(rules_.e2().image, frameIndex, position,
+                kRenderScale.unitVisualScale * camera_.zoom);
+            if (entity.selected || previewed) {
+                // Draw after the sprite so the ground marker remains visible
+                // at the same anchor used by the simulation and hit testing.
+                renderer_.drawCircle(position, 22.0F * camera_.zoom,
+                    entity.selected ? Color{1.0F, 0.84F, 0.20F, 1.0F} : Color{0.35F, 0.78F, 1.0F, 0.95F},
+                    2.0F * camera_.zoom, previewed && !entity.selected);
             }
             const float healthRatio = std::clamp(static_cast<float>(entity.health) /
                 static_cast<float>(entity.maxHealth), 0.0F, 1.0F);
@@ -1354,10 +1449,14 @@ private:
             const Color healthColor = healthRatio >= 0.66F ? Color{0.20F, 0.90F, 0.22F, 1.0F} :
                 healthRatio >= 0.33F ? Color{0.95F, 0.78F, 0.10F, 1.0F} :
                 Color{0.92F, 0.12F, 0.08F, 1.0F};
-            renderer_.drawRect({position.x - healthBarWidth * 0.5F, position.y - 10.0F * camera_.zoom,
+            const float healthBarY = spriteBounds.height > 0.0F ? spriteBounds.y - 8.0F * camera_.zoom :
+                position.y - 8.0F * camera_.zoom;
+            const float healthBarCenterX = spriteBounds.width > 0.0F ?
+                spriteBounds.x + spriteBounds.width * 0.5F : position.x;
+            renderer_.drawRect({healthBarCenterX - healthBarWidth * 0.5F, healthBarY,
                 healthBarWidth, 4.0F * camera_.zoom},
                 {0.16F, 0.02F, 0.02F, 1.0F});
-            renderer_.drawRect({position.x - healthBarWidth * 0.5F, position.y - 10.0F * camera_.zoom,
+            renderer_.drawRect({healthBarCenterX - healthBarWidth * 0.5F, healthBarY,
                 healthBarWidth * healthRatio, 4.0F * camera_.zoom}, healthColor);
         }
 
@@ -1555,6 +1654,7 @@ private:
     ScreenCoord dragEnd_{};
     ScreenCoord sandboxPalettePosition_{118.0F, 92.0F};
     ScreenCoord sandboxPaletteDragOffset_{};
+    std::string lastMouseEvent_ = "NONE";
     IsometricCamera camera_{};
     std::size_t terrainTileCount_ = 0;
     std::vector<MenuButton> menuButtons_ = {

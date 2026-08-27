@@ -176,6 +176,68 @@ Inviso=yes
     assert(moved->facing >= 0 && moved->facing < 8);
     assert(moved->direction == Direction8::SouthEast);
 
+    simulation::Simulation boxSimulation(animationDefinition);
+    const std::uint32_t boxFirst = boxSimulation.spawn(definition, Owner::Red, {4, 4});
+    const std::uint32_t boxSecond = boxSimulation.spawn(definition, Owner::Red, {6, 5});
+    const std::uint32_t boxOutside = boxSimulation.spawn(definition, Owner::Red, {12, 12});
+    boxSimulation.selectBox(std::array<WorldCoord, 4>{
+        WorldCoord{3.0F, 3.0F}, WorldCoord{8.0F, 3.0F},
+        WorldCoord{8.0F, 7.0F}, WorldCoord{3.0F, 7.0F}});
+    assert(boxSimulation.find(boxFirst)->selected);
+    assert(boxSimulation.find(boxSecond)->selected);
+    assert(!boxSimulation.find(boxOutside)->selected);
+
+    simulation::Simulation overrideSimulation(animationDefinition);
+    const std::uint32_t overrideRed = overrideSimulation.spawn(definition, Owner::Red, {0, 0});
+    const std::uint32_t overrideBlue = overrideSimulation.spawn(definition, Owner::Blue, {3, 0});
+    overrideSimulation.find(overrideRed)->recentAttacker = overrideBlue;
+    overrideSimulation.selectEntity(overrideRed);
+    overrideSimulation.issueAttack(overrideBlue);
+    overrideSimulation.issueMove({12, 0});
+    assert(overrideSimulation.find(overrideRed)->order.kind == CommandKind::Move);
+    assert(overrideSimulation.find(overrideRed)->recentAttacker == 0);
+    const float overrideStartX = overrideSimulation.find(overrideRed)->position.x;
+    overrideSimulation.update(0.25F);
+    assert(overrideSimulation.find(overrideRed)->position.x > overrideStartX);
+
+    const auto minimapWorldExtents = [](const IsometricCamera& camera) {
+        constexpr Rect viewport{100.0F, 50.0F, 1390.0F, 780.0F};
+        const ScreenCoord viewportCenter{
+            viewport.x + viewport.width * 0.5F, viewport.y + viewport.height * 0.5F};
+        const WorldCoord center = camera.toWorld(viewportCenter);
+        const WorldCoord corners[] = {
+            camera.toWorld({viewport.x, viewport.y}),
+            camera.toWorld({viewport.x + viewport.width, viewport.y}),
+            camera.toWorld({viewport.x, viewport.y + viewport.height}),
+            camera.toWorld({viewport.x + viewport.width, viewport.y + viewport.height}),
+        };
+        float minX = corners[0].x - center.x;
+        float maxX = minX;
+        float minY = corners[0].y - center.y;
+        float maxY = minY;
+        for (const WorldCoord corner : corners) {
+            minX = std::min(minX, corner.x - center.x);
+            maxX = std::max(maxX, corner.x - center.x);
+            minY = std::min(minY, corner.y - center.y);
+            maxY = std::max(maxY, corner.y - center.y);
+        }
+        return Rect{center.x + minX, center.y + minY, maxX - minX, maxY - minY};
+    };
+    IsometricCamera minimapCamera;
+    minimapCamera.viewportCenter = {795.0F, 440.0F};
+    minimapCamera.worldCenter = {32.0F, 32.0F};
+    const Rect minimapBeforePan = minimapWorldExtents(minimapCamera);
+    minimapCamera.panScreen({160.0F, 90.0F});
+    const Rect minimapAfterPan = minimapWorldExtents(minimapCamera);
+    assert(std::abs(minimapAfterPan.width - minimapBeforePan.width) < 0.001F);
+    assert(std::abs(minimapAfterPan.height - minimapBeforePan.height) < 0.001F);
+    assert(std::abs(minimapAfterPan.x - minimapBeforePan.x) > 0.001F ||
+        std::abs(minimapAfterPan.y - minimapBeforePan.y) > 0.001F);
+    minimapCamera.zoomAt({795.0F, 440.0F}, 1.3F);
+    const Rect minimapAfterZoom = minimapWorldExtents(minimapCamera);
+    assert(minimapAfterZoom.width < minimapAfterPan.width);
+    assert(minimapAfterZoom.height < minimapAfterPan.height);
+
     simulation.clearSelection();
     simulation.selectSingle({static_cast<int>(moved->position.x), static_cast<int>(moved->position.y)});
     simulation.issueAttack(blue);

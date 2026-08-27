@@ -602,11 +602,29 @@ void D3D11Renderer::drawLine(ScreenCoord start, ScreenCoord end, Color color, fl
     const ScreenCoord c{end.x - nx, end.y - ny};
     const ScreenCoord d{start.x - nx, start.y - ny};
     const Vertex vertices[] = {
-        vertex(ndcX(a.x), ndcY(a.y), 0.0F, 0.0F, color), vertex(ndcX(b.x), ndcY(b.y), 0.0F, 0.0F, color),
+        // Keep the winding consistent with drawRect so line geometry is not
+        // removed by the D3D11 back-face rule.
+        vertex(ndcX(a.x), ndcY(a.y), 0.0F, 0.0F, color), vertex(ndcX(d.x), ndcY(d.y), 0.0F, 0.0F, color),
         vertex(ndcX(c.x), ndcY(c.y), 0.0F, 0.0F, color), vertex(ndcX(a.x), ndcY(a.y), 0.0F, 0.0F, color),
-        vertex(ndcX(c.x), ndcY(c.y), 0.0F, 0.0F, color), vertex(ndcX(d.x), ndcY(d.y), 0.0F, 0.0F, color),
+        vertex(ndcX(c.x), ndcY(c.y), 0.0F, 0.0F, color), vertex(ndcX(b.x), ndcY(b.y), 0.0F, 0.0F, color),
     };
     solidVertices_.insert(solidVertices_.end(), std::begin(vertices), std::end(vertices));
+}
+
+void D3D11Renderer::drawCircle(ScreenCoord center, float radius, Color color, float thickness, bool dashed) {
+    constexpr int kSegments = 32;
+    for (int index = 0; index < kSegments; ++index) {
+        if (dashed && ((index / 2) % 2 == 1)) {
+            continue;
+        }
+        const float firstAngle = static_cast<float>(index) * 2.0F * 3.14159265358979323846F /
+            static_cast<float>(kSegments);
+        const float secondAngle = static_cast<float>(index + 1) * 2.0F * 3.14159265358979323846F /
+            static_cast<float>(kSegments);
+        drawLine({center.x + std::cos(firstAngle) * radius, center.y + std::sin(firstAngle) * radius},
+            {center.x + std::cos(secondAngle) * radius, center.y + std::sin(secondAngle) * radius},
+            color, thickness);
+    }
 }
 
 void D3D11Renderer::drawDiamond(ScreenCoord center, float tileWidth, float tileHeight, Color color, Color edge) {
@@ -747,7 +765,10 @@ Rect D3D11Renderer::spriteBounds(std::string_view spriteAssetId, std::size_t fra
         return {ground.x, ground.y, 0.0F, 0.0F};
     }
     const SpriteFrameGPU& frame = asset->frames[frameIndex % asset->frames.size()];
-    return {ground.x - frame.pivotX * scale, ground.y - frame.pivotY * scale,
+    // SHP frames are cropped from a full canvas. Restore the crop offset when
+    // placing the visible rectangle so its feet align with the ground anchor.
+    return {ground.x - (frame.pivotX - frame.frameX) * scale,
+        ground.y - (frame.pivotY - frame.frameY) * scale,
         frame.frameWidth * scale, frame.frameHeight * scale};
 }
 

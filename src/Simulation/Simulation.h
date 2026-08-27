@@ -4,6 +4,7 @@
 #include "GameData/Art.h"
 #include "GameData/Rules.h"
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -56,6 +57,7 @@ public:
     void selectSingle(GridCoord position, float radius = 0.8F);
     void selectEntity(std::uint32_t id);
     void selectBox(WorldCoord topLeft, WorldCoord bottomRight);
+    void selectBox(const std::array<WorldCoord, 4>& corners);
 
     [[nodiscard]] static Direction8 directionFromDelta(float dx, float dy);
 
@@ -75,7 +77,7 @@ private:
     void setAnimation(Entity& entity, AnimationState state);
     void setFacing(Entity& entity, float dx, float dy);
     void updateAnimation(Entity& entity, float seconds);
-    void applyToSelected(const Command& command);
+    void applyToSelected(const Command& command, bool clearRecentAttacker = false);
     void updateEntity(Entity& entity, float seconds);
     [[nodiscard]] Entity* nearestEnemy(const Entity& source, float maxDistance);
     [[nodiscard]] const gamedata::AnimationSequence* animationSequence(AnimationState state) const;

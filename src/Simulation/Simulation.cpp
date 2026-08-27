@@ -21,6 +21,29 @@ bool hostile(Owner first, Owner second) {
     return first != Owner::Neutral && second != Owner::Neutral && first != second;
 }
 
+float cross(WorldCoord a, WorldCoord b, WorldCoord point) {
+    return (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x);
+}
+
+bool pointInConvexQuad(WorldCoord point, const std::array<WorldCoord, 4>& corners) {
+    int sign = 0;
+    for (std::size_t index = 0; index < corners.size(); ++index) {
+        const WorldCoord first = corners[index];
+        const WorldCoord second = corners[(index + 1) % corners.size()];
+        const float edgeCross = cross(first, second, point);
+        if (std::abs(edgeCross) < 0.001F) {
+            continue;
+        }
+        const int currentSign = edgeCross > 0.0F ? 1 : -1;
+        if (sign == 0) {
+            sign = currentSign;
+        } else if (sign != currentSign) {
+            return false;
+        }
+    }
+    return true;
+}
+
 } // namespace
 
 Simulation::Simulation(const gamedata::ArtDefinition& animationDefinition)
@@ -261,10 +284,20 @@ void Simulation::selectBox(WorldCoord topLeft, WorldCoord bottomRight) {
     }
 }
 
-void Simulation::applyToSelected(const Command& command) {
+void Simulation::selectBox(const std::array<WorldCoord, 4>& corners) {
+    clearSelection();
+    for (Entity& entity : entities_) {
+        entity.selected = isAlive(entity) && pointInConvexQuad(entity.position, corners);
+    }
+}
+
+void Simulation::applyToSelected(const Command& command, bool clearRecentAttacker) {
     for (Entity& entity : entities_) {
         if (entity.selected && isAlive(entity)) {
             entity.order = command;
+            if (clearRecentAttacker) {
+                entity.recentAttacker = 0;
+            }
             if (command.kind != CommandKind::Patrol) {
                 entity.patrolPoint.reset();
             }
@@ -273,7 +306,7 @@ void Simulation::applyToSelected(const Command& command) {
 }
 
 void Simulation::issueMove(GridCoord destination) {
-    applyToSelected({CommandKind::Move, destination, 0});
+    applyToSelected({CommandKind::Move, destination, 0}, true);
 }
 
 void Simulation::issueStop() {
@@ -289,16 +322,17 @@ void Simulation::issuePatrol(GridCoord destination) {
         if (entity.selected && isAlive(entity)) {
             entity.patrolPoint = toGrid(entity.position);
             entity.order = {CommandKind::Patrol, destination, 0};
+            entity.recentAttacker = 0;
         }
     }
 }
 
 void Simulation::issueAttackMove(GridCoord destination) {
-    applyToSelected({CommandKind::AttackMove, destination, 0});
+    applyToSelected({CommandKind::AttackMove, destination, 0}, true);
 }
 
 void Simulation::issueAttack(std::uint32_t target) {
-    applyToSelected({CommandKind::Attack, {}, target});
+    applyToSelected({CommandKind::Attack, {}, target}, true);
 }
 
 const Entity* Simulation::find(std::uint32_t id) const {

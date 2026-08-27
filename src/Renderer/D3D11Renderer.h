@@ -100,6 +100,8 @@ public:
     void drawRect(Rect rect, Color color);
     void drawBorder(Rect rect, Color color, float thickness = 2.0F);
     void drawLine(ScreenCoord start, ScreenCoord end, Color color, float thickness = 1.0F);
+    void drawCircle(ScreenCoord center, float radius, Color color, float thickness = 2.0F,
+        bool dashed = false);
     void drawDiamond(ScreenCoord center, float tileWidth, float tileHeight, Color color, Color edge);
     void drawSprite(std::string_view spriteAssetId, std::string_view paletteAssetId, std::size_t frameIndex,
         Owner owner, ScreenCoord center, float scale);
