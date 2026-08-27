@@ -199,13 +199,26 @@
 
 项目目前处于 C++ 重启后的最早期阶段，**还不是可替代 `gamemd.exe` 的完整游戏版本**。
 
+当前 `feature/first-playable-editor-shell` 分支新增第一轮可玩编辑器垂直切片：
+
+- `C++23 + CMake + SDL3 + Direct3D 11` 客户端工程骨架；
+- RA2/YR 红黑 CRT / 银灰金属控制台主菜单，使用独立图片按钮和 hover/pressed 状态；DTA/CnCNet 仅作组件结构参考；
+- 同一 EXE 内的 Editor/Sandbox 模式；
+- 程序化 64x64 等距草地开发地图；
+- Rules 驱动 E2/M1Carbine/SA/InvisibleLow 数据读取；
+- 项目自有最小运行素材中的真实 `CONS.SHP`、`unittem.pal` 读取与红蓝 owner remap；
+- 选择、移动、停止、Hold、巡逻、Attack Move、攻击、扣血和死亡；
+- 右下角 3 行 5 列 Command Card。
+
+该 slice 的范围、构建与 Classic 兼容边界见 [`docs/FIRST_PLAYABLE_EDITOR_SLICE.md`](./docs/FIRST_PLAYABLE_EDITOR_SLICE.md)。其中程序化草地明确属于 Development Sandbox，不代表真实 TMP/MAP 兼容已经完成。
+
 当前第一阶段是：
 
 # P0 — Original Content Boot
 
 目标只聚焦一件事：
 
-> **从真实 RA2YR 测试内容中直接完成 MIX → MAP → TMP → PAL → D3D11 链路，并在程序窗口中真正显示出一张 RA2YR 地图。**
+> **先用项目自有最小素材完成 Rules/Art → SHP/PAL → D3D11 链路，并在程序窗口中稳定显示首轮编辑器切片。**
 
 P0 通过后，才会继续加入：
 
@@ -251,6 +264,8 @@ P0 通过后，才会继续加入：
 - [`LFS语料导入.md`](./尤里的复仇1.001/LFS语料导入.md) 定义的完整 Git LFS Compatibility Corpus 方案。
 
 大型兼容性资源采用 Git LFS 保存。当前冻结的 corpus 结构以 7 个顶层 MIX 为权威原始件，并额外保存 48 个已解析 nested MIX、关键 INI/CSF 和 13 个官方 `.yro` 地图；TMP/PAL/SHP/VXL/HVA 等大量 leaf asset 由对应 nested MIX 完整承载，避免把同一字节重复存储数倍。所有 corpus 文件都必须通过 SHA-256 manifest 与 fresh-clone LFS materialization 验收。
+
+> 状态说明：以上是 Compatibility Corpus 的历史/可选导入方案（Superseded for the Development Sandbox）。当前首轮编辑器沙盒使用仓库自带的 `INI/` 与 `assets/`，不要求设置 `RA2YR_CORPUS_ROOT`；corpus 继续由独立的 `agent/ra2yr-corpus-lfs` worktree 管理。
 
 ---
 

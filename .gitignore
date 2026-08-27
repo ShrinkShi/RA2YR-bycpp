@@ -1,0 +1,15 @@
+/build/
+/.vs/
+/.idea/
+CMakeUserPresets.json
+/artifacts/manual-validation/
+/artifacts/audio.idx
+/artifacts/audio.bag
+/artifacts/audio-source/
+/tools/ra2yr-corpus/__pycache__/
+*.user
+*.suo
+*.pdb
+*.ilk
+*.obj
+*.vcxproj*

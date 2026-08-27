@@ -1,5 +1,7 @@
 # 尤里的复仇 1.001 参考语料说明
 
+> Superseded for the Development Sandbox: 本文件只描述独立的 Git LFS Compatibility Corpus worktree。当前 `feature/first-playable-editor-shell` 的 Development Sandbox 使用仓库自带 `INI/` 和 `assets/`，不要求 `RA2YR_CORPUS_ROOT`，也不应把本目录的 1GB+ 语料复制或合并进该分支。
+
 本目录记录 `RA2YR-bycpp` 对 **Red Alert 2 + Yuri's Revenge 1.001** 原版/官方增补资源的兼容性参考信息。
 
 本次审计样本来自维护者提供的“1.006 + YR 1.001、官方地图增补包、音乐包、Windows 10/11 兼容补丁、无过场动画版”发行包。它不是可直接视为“纯净光盘原版”的黄金镜像，因此这里把 **原版/官方内容** 与 **第三方发行包附加内容** 明确分开。
