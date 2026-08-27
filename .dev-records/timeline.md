@@ -184,3 +184,9 @@
 - 重新 fetch 后 `origin/main` 仍为 `1c077e44399721d7f567993d422c7b507504f90c`；旧 PR #1 分支仍为 `96b9b8493e924db9a612442e84f4691fd6f54ca1`。
 - 官方 `tools/dev/setup.ps1`、`build.ps1` 和 `test.ps1` 完成；MSVC x64、CMake 4.4.2、Ninja 1.13.2、独立 `E:\Tools\vcpkg`，CTest `1/1 PASS`。
 - 最新 `ra2yr_client.exe` 实际启动且未立即退出；日志确认 D3D11/SDL、Rules/Art、CONS.SHP、unittem.pal 和三组 E2 VoiceSet 加载。窗口截图保存在被忽略的 `artifacts/round2-validation/`，只作为运行证据，不宣称人工验收通过。
+
+## 2026-08-27 - PR #2 编队与 UI 几何最终验证
+
+- 仅在 canonical checkout `E:\时锐\RA2\RA2YR-bycpp` 继续修复；重新 fetch 后 PR #2 远端 HEAD 为 `e3adeb48ecc001ee477d4cf86e560f1b61a33e02`，`origin/main` 为 `1c077e44399721d7f567993d422c7b507504f90c`。
+- 补齐 Sandbox asset card 的 icon/label parent-relative Rect，修复单位抵达后 stale reservation 未从 reservation map 释放的问题，并增加同目标二次编队回归检查。
+- 重新执行 CMake configure、MSVC build/link、CTest 和实际 EXE 启动；采集主菜单、Editor、F3 occupancy、Unit Status 运行截图，保留为人工复核证据，不宣称人工验收通过。

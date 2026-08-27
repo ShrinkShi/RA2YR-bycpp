@@ -18,6 +18,8 @@ find_package(SDL3 CONFIG REQUIRED)
 
 add_library(ra2yr_core
     src/Engine/Core/Types.h
+    src/Engine/Core/Utf.cpp
+    src/Engine/Core/Utf.h
     src/Westwood/Ini/Ini.cpp
     src/Westwood/Ini/Ini.h
     src/Westwood/Palette/Palette.cpp

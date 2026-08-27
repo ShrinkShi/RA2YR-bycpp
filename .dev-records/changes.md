@@ -142,3 +142,16 @@
 ### 最终验证补充
 - 最新改动重新完成官方 setup/configure、MSVC compile/link 和 CTest `1/1 PASS`；UnitStatus 阈值来自 `UI.ini`，Editor brush presets 来自 `Editor.ini`，武器卡贴图按 Rules weapon registry 动态加载。
 - 实际启动最新 `ra2yr_client.exe` 并采集主菜单、Editor Sandbox、F3 Debug Overlay 窗口证据；截图不替代人工视觉/交互验收。
+
+## 2026-08-27 - 编队 reservation 与 Sandbox card geometry 收口
+
+### 变更
+
+- `Simulation::commitReservation` 现在先释放 reservation map，再写入当前 occupancy；`releaseReservation` 同步清空 cell/subcell 字段，避免旧目标槽位永久阻塞后续命令。
+- Sandbox palette 增加 `sandbox.asset.icon.*` 与 `sandbox.asset.label.*` 相对 Rect；素材卡片绘制使用同一份配置布局，图标与标签不再依赖 C++ inset 常量。
+- 编队测试覆盖 6/9 infantry 的 3-subcell 分配、每格三种 subcell、确定性 assignment 和抵达后二次复用。
+
+### 验证
+
+- `tools/dev/setup.ps1` configure/generate PASS；MSVC x64 build/link PASS；CTest `1/1 PASS`。
+- EXE 实际启动且保持响应，日志确认 SDL/D3D11、Rules/Art、CONS.SHP、unittem.pal 和 E2 VoiceSet 样本加载。

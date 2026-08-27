@@ -28,6 +28,8 @@ enum class InfantrySubcell : std::int8_t {
     BottomRight = 2,
 };
 
+[[nodiscard]] const char* infantrySubcellName(InfantrySubcell subcell);
+
 struct Entity {
     std::uint32_t id = 0;
     std::string definitionId;
@@ -110,7 +112,9 @@ private:
     void setFacing(Entity& entity, float dx, float dy);
     void updateAnimation(Entity& entity, float seconds);
     void applyToSelected(const Command& command, bool clearRecentAttacker = false);
+    void issueGroupMove(GridCoord destination);
     void updateEntity(Entity& entity, float seconds);
+    void applyInfantrySeparation(Entity& entity, float seconds);
     void releaseOccupancy(Entity& entity);
     void releaseReservation(Entity& entity);
     [[nodiscard]] bool reserveDestination(Entity& entity, GridCoord destination);
@@ -129,6 +133,7 @@ private:
     gamedata::ArtDefinition animationDefinition_;
     std::vector<Entity> entities_;
     std::map<std::pair<int, int>, std::array<std::uint32_t, 3>> infantryOccupancy_;
+    std::map<std::pair<int, int>, std::array<std::uint32_t, 3>> infantryReservations_;
     std::uint32_t nextId_ = 1;
     const gamedata::VeterancyDatabase* veterancyDatabase_ = nullptr;
 };

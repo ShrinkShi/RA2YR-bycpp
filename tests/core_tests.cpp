@@ -1,4 +1,5 @@
 #include "GameData/Art.h"
+#include "Engine/Core/Utf.h"
 #include "GameData/Rules.h"
 #include "GameData/Terrain.h"
 #include "GameData/UI.h"
@@ -16,6 +17,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <utility>
 #include <vector>
 
 int main() {
@@ -102,8 +105,15 @@ Inviso=yes
     const Rect commandSlot = ui.childRect("hud.command_card", "hud.command_card.slot.0");
     assert(commandSlot.x == ui.rect("hud.command_card").x + 5.0F);
     assert(commandSlot.y == ui.rect("hud.command_card").y + 28.0F);
+    const Rect assetIcon = ui.relativeRect("sandbox.asset.icon.0");
+    const Rect assetLabel = ui.relativeRect("sandbox.asset.label.0");
+    assert(assetIcon.width > 0.0F && assetIcon.height > 0.0F);
+    assert(assetLabel.width == ui.relativeRect("sandbox.asset.card.0").width);
     assert(std::abs(ui.setting("HUD.UnitStatus", "HealthyThreshold") - 0.60F) < 0.001F);
     assert(std::abs(ui.setting("HUD.UnitStatus", "CriticalThreshold") - 0.30F) < 0.001F);
+    assert(std::abs(ui.setting("HUD.UnitStatus", "CardColumns") - 5.0F) < 0.001F);
+    assert(utf8ToWide("动员兵") == L"动员兵");
+    assert(wideToUtf8(L"轻型装甲") == "轻型装甲");
 
     westwood::IniDocument voices;
     assert(voices.load(contentRoot / "assets/audio/voices.ini", error));
@@ -294,6 +304,78 @@ Inviso=yes
         }
     }
 
+    const auto formationSignature = [&](std::size_t count) {
+        simulation::Simulation formation(animationDefinition);
+        std::vector<std::uint32_t> ids;
+        for (std::size_t index = 0; index < count; ++index) {
+            const std::uint32_t id = formation.spawn(infantryDefinition, Owner::Red,
+                {static_cast<int>(index) * 2, 2});
+            assert(id != 0);
+            ids.push_back(id);
+            formation.find(id)->selected = true;
+        }
+        formation.issueMove({8, 8});
+        std::vector<std::pair<GridCoord, simulation::InfantrySubcell>> signature;
+        for (const std::uint32_t id : ids) {
+            const auto* entity = formation.find(id);
+            assert(entity != nullptr && entity->reservedSubcell != simulation::InfantrySubcell::None);
+            signature.emplace_back(entity->reservedCell, entity->reservedSubcell);
+        }
+        return std::pair{std::move(formation), std::move(signature)};
+    };
+    auto [sixFormation, sixSignature] = formationSignature(6);
+    auto sixRepeat = formationSignature(6);
+    assert(sixSignature == sixRepeat.second);
+    for (int step = 0; step < 600; ++step) {
+        sixFormation.update(1.0F / 60.0F);
+    }
+    std::map<std::pair<int, int>, int> sixCells;
+    std::map<std::pair<int, int>, std::array<bool, 3>> sixSubcells;
+    for (const auto& entity : sixFormation.entities()) {
+        sixCells[{entity.occupancyCell.x, entity.occupancyCell.y}]++;
+        const auto slot = static_cast<std::size_t>(entity.occupancySubcell);
+        assert(slot < 3U);
+        sixSubcells[{entity.occupancyCell.x, entity.occupancyCell.y}][slot] = true;
+    }
+    assert(sixCells.size() == 2);
+    for (const auto& [cell, cellCount] : sixCells) {
+        assert(cellCount == 3);
+        assert(std::all_of(sixSubcells[cell].begin(), sixSubcells[cell].end(),
+            [](bool occupied) { return occupied; }));
+    }
+    // A second command to the same cell must reuse the released slots rather than
+    // seeing stale reservations left behind by the first arrival.
+    sixFormation.issueMove({8, 8});
+    for (std::size_t index = 0; index < sixSignature.size(); ++index) {
+        const auto& entity = sixFormation.entities()[index];
+        assert(std::make_pair(entity.reservedCell, entity.reservedSubcell) == sixSignature[index]);
+    }
+    auto [nineFormation, nineSignature] = formationSignature(9);
+    static_cast<void>(nineSignature);
+    for (int step = 0; step < 600; ++step) {
+        nineFormation.update(1.0F / 60.0F);
+    }
+    std::map<std::pair<int, int>, int> nineCells;
+    std::map<std::pair<int, int>, std::array<bool, 3>> nineSubcells;
+    for (const auto& entity : nineFormation.entities()) {
+        nineCells[{entity.occupancyCell.x, entity.occupancyCell.y}]++;
+        const auto slot = static_cast<std::size_t>(entity.occupancySubcell);
+        assert(slot < 3U);
+        nineSubcells[{entity.occupancyCell.x, entity.occupancyCell.y}][slot] = true;
+    }
+    assert(nineCells.size() == 3);
+    for (const auto& [cell, cellCount] : nineCells) {
+        assert(cellCount == 3);
+        assert(std::all_of(nineSubcells[cell].begin(), nineSubcells[cell].end(),
+            [](bool occupied) { return occupied; }));
+    }
+    for (std::size_t first = 0; first < nineFormation.entities().size(); ++first) {
+        for (std::size_t second = first + 1; second < nineFormation.entities().size(); ++second) {
+            assert(distance(nineFormation.entities()[first].position,
+                nineFormation.entities()[second].position) > 0.01F);
+        }
+    }
+
     simulation::Simulation overrideSimulation(animationDefinition);
     const std::uint32_t overrideRed = overrideSimulation.spawn(definition, Owner::Red, {0, 0});
     const std::uint32_t overrideBlue = overrideSimulation.spawn(definition, Owner::Blue, {3, 0});
@@ -411,7 +493,9 @@ Inviso=yes
         statusEntity, statusDefinition, rules, veterancy, {});
     assert(status.displayName == "动员兵" && status.healthBand == client::hud::HealthBand::Critical);
     assert(status.shields.size() == 2 && status.energy == 4 && status.kills == 2);
-    assert(status.weapons.size() == 3 && status.tags.size() == 2);
+    assert(status.weapons.size() == 3 && status.tags.size() == 3);
+    assert(client::hud::UnitStatusViewModelBuilder::tooltip(status.weapons.front()).find(L"伤害：") !=
+        std::wstring::npos);
 
     gamedata::UnitDefinition alliedDefinition = definition;
     alliedDefinition.id = "S1";

@@ -142,6 +142,17 @@ Sprite constant buffer 从单色扩展为 16 个 RGBA 项；未来更多 HouseCo
 - 保持本轮范围在现有 Editor Sandbox 的选择标识、Simulation occupancy、UI.ini 主题布局和 E2 VoiceSet；不新增完整 Editor 绘图工具、复杂 Unit Info Panel、第二单位、生产、AI 或 Trigger。
 - 运行截图作为可复核证据保存，但不把自动截图、静态检查或 CTest 描述为人工视觉/交互验收通过。
 
+## 2026-08-27 - 编队 reservation 生命周期
+
+### 决策
+
+- 将 group destination reservation 与当前 occupancy 保持两张独立 map；group command 先按 EntityId 计算全部 slot，再批量写 reservation，抵达时显式转移为 occupancy。
+- reservation 的释放必须是生命周期操作，而不是只清 Entity 字段；因此 commit、取消命令和后续编队命令都经过同一 `releaseReservation` 路径。
+
+### 原因
+
+- 仅清除 Entity 的 reservation 字段会留下不可见的旧槽位，破坏连续命令和确定性分配；统一释放路径能让逻辑状态与 F3 诊断保持一致。
+
 ## 2026-08-27 - Formal panel skin assets
 
 ### 决策

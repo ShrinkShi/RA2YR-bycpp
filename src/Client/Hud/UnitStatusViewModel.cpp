@@ -1,6 +1,40 @@
 #include "Client/Hud/UnitStatusViewModel.h"
 
+#include "Engine/Core/Utf.h"
+
 #include <algorithm>
+#include <iomanip>
+#include <sstream>
+
+namespace {
+
+std::wstring number(float value) {
+    std::wostringstream stream;
+    stream << std::fixed << std::setprecision(2) << value;
+    std::wstring result = stream.str();
+    while (!result.empty() && result.back() == L'0') {
+        result.pop_back();
+    }
+    if (!result.empty() && result.back() == L'.') {
+        result.pop_back();
+    }
+    return result;
+}
+
+std::wstring targetLabel(std::string_view targetTypes) {
+    if (targetTypes == "Ground") {
+        return L"地面单位";
+    }
+    if (targetTypes == "Air") {
+        return L"空中单位";
+    }
+    if (targetTypes == "Ground,Air" || targetTypes == "Air,Ground") {
+        return L"地面/空中单位";
+    }
+    return ra2yr::utf8ToWide(targetTypes);
+}
+
+} // namespace
 
 namespace ra2yr::client::hud {
 
@@ -47,19 +81,22 @@ UnitStatusViewModel UnitStatusViewModelBuilder::build(const simulation::Entity& 
     for (const std::string& tag : definition.unitTags) {
         model.tags.push_back(rules.tagUiName(tag));
     }
+    if (!model.armor.uiName.empty()) {
+        model.tags.push_back(model.armor.uiName);
+    }
     return model;
 }
 
 std::wstring UnitStatusViewModelBuilder::tooltip(const ArmorCardViewModel& card) {
-    return std::wstring(card.uiName.begin(), card.uiName.end()) + L"  Armor: " +
-        std::to_wstring(card.value) + L"  Upgrade: " + std::to_wstring(card.upgradeLevel);
+    return ra2yr::utf8ToWide(card.uiName) + L"\n护甲：" + std::to_wstring(card.value) +
+        L"\n升级：" + std::to_wstring(card.upgradeLevel) + L"/5";
 }
 
 std::wstring UnitStatusViewModelBuilder::tooltip(const WeaponCardViewModel& card) {
-    return std::wstring(card.uiName.begin(), card.uiName.end()) + L"  Damage: " +
-        std::to_wstring(card.damage) + L"  Range: " + std::to_wstring(card.range) +
-        L"  ROF: " + std::to_wstring(card.rateOfFire) + L"  Targets: " +
-        std::wstring(card.targetTypes.begin(), card.targetTypes.end());
+    const float interval = card.rateOfFire > 0 ? 25.0F / static_cast<float>(card.rateOfFire) : 0.0F;
+    return ra2yr::utf8ToWide(card.uiName) + L"\n伤害：" + std::to_wstring(card.damage) +
+        L"\n攻击范围：" + number(card.range) + L"\n攻击间隔：" + number(interval) + L"秒\n目标：" +
+        targetLabel(card.targetTypes) + L"\n升级：" + std::to_wstring(card.upgradeLevel) + L"/5";
 }
 
 } // namespace ra2yr::client::hud
