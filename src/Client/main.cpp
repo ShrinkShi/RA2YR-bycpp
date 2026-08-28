@@ -57,7 +57,7 @@ struct RenderScaleConfig {
 constexpr RenderScaleConfig kRenderScale{4.65F, 1.35F, 1.10F, 1.20F};
 constexpr float kTileWidth = 48.0F * kRenderScale.worldRenderScale;
 constexpr float kTileHeight = 24.0F * kRenderScale.worldRenderScale;
-constexpr float kCameraEdgeThreshold = 22.0F;
+constexpr float kCameraEdgeThreshold = 4.0F;
 constexpr float kCameraPanPixelsPerSecond = 420.0F;
 
 struct ProductionIconAsset {
@@ -878,20 +878,19 @@ private:
     }
 
     void updateCamera(float seconds) {
-        const Rect viewport = worldViewport();
-        if (!inWorld(mouse_) || dragging_ || rightMouseDown_ || sandboxPaletteDragging_ ||
+        if (dragging_ || rightMouseDown_ || minimapDragging_ || sandboxPaletteDragging_ ||
             (sandboxPaletteVisible_ && sandboxPaletteRect().contains(mouse_.x, mouse_.y))) {
             return;
         }
         ScreenCoord delta{};
-        if (mouse_.x <= viewport.x + kCameraEdgeThreshold) {
+        if (mouse_.x <= kCameraEdgeThreshold) {
             delta.x -= kCameraPanPixelsPerSecond * seconds;
-        } else if (mouse_.x >= viewport.x + viewport.width - kCameraEdgeThreshold) {
+        } else if (mouse_.x >= kLogicalWidth - kCameraEdgeThreshold) {
             delta.x += kCameraPanPixelsPerSecond * seconds;
         }
-        if (mouse_.y <= viewport.y + kCameraEdgeThreshold) {
+        if (mouse_.y <= kCameraEdgeThreshold) {
             delta.y -= kCameraPanPixelsPerSecond * seconds;
-        } else if (mouse_.y >= viewport.y + viewport.height - kCameraEdgeThreshold) {
+        } else if (mouse_.y >= kLogicalHeight - kCameraEdgeThreshold) {
             delta.y += kCameraPanPixelsPerSecond * seconds;
         }
         if (std::abs(delta.x) > 0.0F || std::abs(delta.y) > 0.0F) {
@@ -1659,7 +1658,7 @@ private:
                 continue;
             }
             const float candidate = distance(entity.position, position);
-            const float hitRadius = std::max(0.20F, entity.selectionRadius * 1.35F);
+            const float hitRadius = std::max(0.12F, entity.selectionRadius * 1.35F);
             if (candidate <= hitRadius && candidate < closest) {
                 closest = candidate;
                 result = entity.id;
@@ -1899,7 +1898,7 @@ private:
     }
 
     void renderMiniMap(Rect panel) {
-        drawHudPanel(panel, "ui.hud.minimap.background", T("minimap"));
+        drawHudPanel(panel, "ui.hud.minimap.background", L"");
         const Rect field = ui_.childRect("hud.minimap", "minimap.field");
         renderer_.drawRect(field, {0.025F, 0.10F, 0.065F, 1.0F});
         const IsoMapProjection mapProjection = minimapProjection();
@@ -2125,6 +2124,53 @@ private:
         }
     }
 
+    void drawCommandIcon(int slot, const Rect& button, Color color) {
+        const ScreenCoord center{button.x + button.width * 0.5F, button.y + button.height * 0.42F};
+        const float size = std::min(button.width, button.height) * 0.27F;
+        switch (slot) {
+        case 0: { // Move: directional arrow.
+            const ScreenCoord start{center.x - size, center.y + size * 0.65F};
+            const ScreenCoord end{center.x + size, center.y - size * 0.65F};
+            renderer_.drawLine(start, end, color, 4.0F);
+            renderer_.drawLine(end, {end.x - size * 0.48F, end.y}, color, 4.0F);
+            renderer_.drawLine(end, {end.x, end.y + size * 0.48F}, color, 4.0F);
+            break;
+        }
+        case 1: // Stop: solid square.
+            renderer_.drawRect({center.x - size * 0.72F, center.y - size * 0.72F,
+                size * 1.44F, size * 1.44F}, color);
+            break;
+        case 2: // Hold: two vertical defensive bars.
+            renderer_.drawRect({center.x - size * 0.72F, center.y - size * 0.72F,
+                size * 0.42F, size * 1.44F}, color);
+            renderer_.drawRect({center.x + size * 0.30F, center.y - size * 0.72F,
+                size * 0.42F, size * 1.44F}, color);
+            break;
+        case 3: { // Patrol: looping route arrows.
+            const ScreenCoord left{center.x - size, center.y + size * 0.25F};
+            const ScreenCoord top{center.x, center.y - size * 0.65F};
+            const ScreenCoord right{center.x + size, center.y + size * 0.25F};
+            renderer_.drawLine(left, top, color, 3.5F);
+            renderer_.drawLine(top, right, color, 3.5F);
+            renderer_.drawLine(right, {right.x - size * 0.42F, right.y - size * 0.12F}, color, 3.5F);
+            renderer_.drawLine(right, {right.x - size * 0.18F, right.y - size * 0.46F}, color, 3.5F);
+            break;
+        }
+        case 4: // Attack-move: crosshair with a direction arrow.
+            renderer_.drawCircle(center, size * 0.62F, color, 3.0F, false);
+            renderer_.drawLine({center.x - size, center.y}, {center.x + size, center.y}, color, 3.0F);
+            renderer_.drawLine({center.x, center.y - size}, {center.x, center.y + size}, color, 3.0F);
+            break;
+        case 5: // Force attack: crosshair plus strike.
+            renderer_.drawCircle(center, size * 0.70F, color, 3.0F, false);
+            renderer_.drawLine({center.x - size * 0.95F, center.y + size * 0.95F},
+                {center.x + size * 0.95F, center.y - size * 0.95F}, color, 4.0F);
+            break;
+        default:
+            break;
+        }
+    }
+
     void drawTargetIndicators() {
         if (!hasSelectedUnits()) {
             return;
@@ -2162,16 +2208,6 @@ private:
         renderer_.drawRect(world, {0.04F, 0.07F, 0.05F, 1.0F});
         renderer_.drawStaticTerrain();
         renderer_.drawBorder(world, {0.65F, 0.48F, 0.18F, 1.0F}, 3.0F);
-
-        if (inWorld(mouse_)) {
-            const GridCoord hoveredCell = screenToGrid(mouse_);
-            if (terrainMap_.contains(hoveredCell) && terrainMap_.cell(hoveredCell).exists) {
-                renderer_.drawDiamond(gridToScreen({static_cast<float>(hoveredCell.x),
-                    static_cast<float>(hoveredCell.y)}), kTileWidth * camera_.zoom,
-                    kTileHeight * camera_.zoom, {0.98F, 0.78F, 0.16F, 0.16F},
-                    {1.0F, 0.88F, 0.30F, 0.95F});
-            }
-        }
 
         const std::uint32_t hoveredUnit = !dragging_ && inWorld(mouse_) ? unitAt(mouse_) : 0;
         std::vector<const simulation::Entity*> renderOrder;
@@ -2447,9 +2483,9 @@ private:
                     // Tooltip is a modal visual layer.  Its opaque backing
                     // must hide the status text underneath when the card is
                     // hovered, even if a mod supplies a translucent image.
-                    renderer_.drawRect(tooltip, {0.008F, 0.010F, 0.014F, 0.98F});
-                    renderer_.drawBorder(tooltip, {0.74F, 0.42F, 0.10F, 1.0F}, 2.0F);
                     renderer_.drawImage("ui.unitstatus.tooltip", tooltip);
+                    renderer_.drawRect(tooltip, {0.008F, 0.010F, 0.014F, 1.0F});
+                    renderer_.drawBorder(tooltip, {0.74F, 0.42F, 0.10F, 1.0F}, 2.0F);
                     renderer_.drawText(hoveredTooltip,
                         {tooltip.x + 14.0F, tooltip.y + 9.0F,
                             tooltip.width - 28.0F, tooltip.height - 18.0F}, 11,
@@ -2467,7 +2503,13 @@ private:
                 ui_.childRect("hud.command_card", "hud.command_card.target"), 12,
                 {1.0F, 0.34F, 0.18F, 1.0F}, false);
         }
-        const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "force_attack", "", "", "", "", "", "", "", "", ""};
+        const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "force_attack",
+            "", "", "", "", "", "", "", "", ""};
+        const std::string commandHintKeys[] = {"command_move_hint", "command_stop_hint", "command_hold_hint",
+            "command_patrol_hint", "command_attack_move_hint", "command_force_attack_hint", "", "", "", "",
+            "", "", "", "", ""};
+        const std::wstring shortcutKeys[] = {L"M", L"S", L"H", L"P", L"A", L"K", L"", L"", L"", L"", L"", L"", L"", L"", L""};
+        std::wstring hoveredCommand;
         for (int slot = 0; slot < 15; ++slot) {
             const Rect button = ui_.childRect("hud.command_card",
                 "hud.command_card.slot." + std::to_string(slot));
@@ -2480,9 +2522,43 @@ private:
             renderer_.drawImage(hot || active ? "ui.hud.button_hover" : "ui.hud.button", button,
                 active ? Color{1.0F, 0.78F, 0.38F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
             if (selected != nullptr && !commandKeys[slot].empty()) {
-                const int fontSize = slot == 4 ? 9 : slot == 5 ? 10 : 13;
-                renderer_.drawText(T(commandKeys[slot]), button, fontSize, {1.0F, 0.84F, 0.26F, 1.0F});
+                const Color iconColor = active ? Color{1.0F, 0.94F, 0.54F, 1.0F} :
+                    Color{1.0F, 0.72F, 0.16F, 1.0F};
+                drawCommandIcon(slot, button, iconColor);
+                renderer_.drawText(shortcutKeys[slot],
+                    {button.x + button.width - 22.0F, button.y + button.height - 22.0F, 18.0F, 18.0F},
+                    11, {1.0F, 0.90F, 0.36F, 1.0F});
+                if (hot) {
+                    hoveredCommand = T(commandKeys[slot]) + L"\n" + T(commandHintKeys[slot]);
+                }
             }
+        }
+        if (!hoveredCommand.empty()) {
+            std::size_t lineCount = 1;
+            std::size_t currentLineLength = 0;
+            std::size_t maxLineLength = 0;
+            for (const wchar_t character : hoveredCommand) {
+                if (character == L'\n') {
+                    maxLineLength = std::max(maxLineLength, currentLineLength);
+                    currentLineLength = 0;
+                    ++lineCount;
+                } else {
+                    ++currentLineLength;
+                }
+            }
+            maxLineLength = std::max(maxLineLength, currentLineLength);
+            const float tooltipWidth = std::clamp(static_cast<float>(maxLineLength) * 11.0F + 28.0F,
+                150.0F, 330.0F);
+            const float tooltipHeight = static_cast<float>(lineCount) * 18.0F + 18.0F;
+            Rect tooltip{mouse_.x + 12.0F, mouse_.y - tooltipHeight - 12.0F, tooltipWidth, tooltipHeight};
+            tooltip.x = std::clamp(tooltip.x, 6.0F, kLogicalWidth - tooltip.width - 6.0F);
+            tooltip.y = std::clamp(tooltip.y, 6.0F, kLogicalHeight - tooltip.height - 6.0F);
+            renderer_.drawImage("ui.unitstatus.tooltip", tooltip);
+            renderer_.drawRect(tooltip, {0.008F, 0.010F, 0.014F, 1.0F});
+            renderer_.drawBorder(tooltip, {0.74F, 0.42F, 0.10F, 1.0F}, 2.0F);
+            renderer_.drawText(hoveredCommand,
+                {tooltip.x + 14.0F, tooltip.y + 9.0F, tooltip.width - 28.0F, tooltip.height - 18.0F},
+                11, {1.0F, 0.92F, 0.62F, 1.0F}, false);
         }
 
         renderer_.drawText(T("editor_title"), ui_.rect("editor.title"), 21,

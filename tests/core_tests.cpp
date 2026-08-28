@@ -73,7 +73,7 @@ Inviso=yes
     assert(rules.e2().faction == Faction::Soviet);
     assert(rules.e2().unitTags.size() == 2 && rules.e2().unitTags[0] == "Biological" &&
         rules.e2().unitTags[1] == "Infantry");
-    assert(std::abs(rules.e2().selectionRadius - 0.22F) < 0.001F);
+    assert(std::abs(rules.e2().selectionRadius - 0.11F) < 0.001F);
     assert(rules.e2().occupancyProfile == "Infantry");
     assert(rules.e2().voiceSelect == "E2Select" && rules.e2().voiceMove == "E2Move" &&
         rules.e2().voiceAttack == "E2Attack");
@@ -122,6 +122,10 @@ Inviso=yes
         assert(std::filesystem::exists(ui.imagePath(imageId, contentRoot)));
     }
     assert(ui.rect("hud.unitstatus").width > 600.0F);
+    assert(ui.childRect("hud.unitstatus", "hud.unitstatus.preview").x ==
+        ui.rect("hud.unitstatus").x + 30.0F);
+    assert(ui.childRect("hud.unitstatus", "hud.unitstatus.name").x ==
+        ui.rect("hud.unitstatus").x + 310.0F);
     assert(ui.childRect("hud.unitstatus", "hud.unitstatus.preview").width > 0.0F);
     assert(ui.relativeRect("hud.unitstatus.card.badge").width > 0.0F);
     assert(ui.imagePath("ui.hud.unitstatus.background", contentRoot).filename() == "unitstatus_clean.png");
