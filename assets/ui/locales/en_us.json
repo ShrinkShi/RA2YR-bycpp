@@ -94,5 +94,6 @@
   "armor.Light.name": "LIGHT ARMOR",
   "tag.Biological.name": "BIOLOGICAL",
   "tag.Infantry.name": "INFANTRY",
+  "unit_classification": "BIOLOGICAL UNIT-LIGHT ARMOR",
   "veterancy.Rookie.name": "ROOKIE"
 }

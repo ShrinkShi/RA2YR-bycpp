@@ -94,5 +94,6 @@
   "armor.Light.name": "轻型装甲",
   "tag.Biological.name": "生物",
   "tag.Infantry.name": "步兵",
+  "unit_classification": "生物单位-轻甲",
   "veterancy.Rookie.name": "新兵"
 }

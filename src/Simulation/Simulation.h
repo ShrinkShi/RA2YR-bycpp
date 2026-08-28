@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -123,7 +124,7 @@ private:
     [[nodiscard]] WorldCoord movementDestination(const Entity& entity) const;
     [[nodiscard]] static bool isInfantry(const Entity& entity);
     [[nodiscard]] std::optional<SubcellLocation> findAvailableSubcell(GridCoord requested,
-        std::uint32_t entityId) const;
+        std::uint32_t entityId);
     static WorldCoord subcellPosition(GridCoord cell, InfantrySubcell subcell);
     [[nodiscard]] Entity* nearestEnemy(const Entity& source, float maxDistance);
     void awardExperience(Entity& attacker, const Entity& target);
@@ -137,6 +138,7 @@ private:
     std::map<std::pair<int, int>, std::array<std::uint32_t, 3>> infantryReservations_;
     std::uint32_t nextId_ = 1;
     const gamedata::VeterancyDatabase* veterancyDatabase_ = nullptr;
+    std::mt19937 random_{std::random_device{}()};
 };
 
 } // namespace ra2yr::simulation

@@ -89,6 +89,7 @@ Inviso=yes
     assert(chinese.get("unit.E2.name") == "动员兵");
     assert(english.get("unit.E2.name") == "CONSCRIPT");
     assert(chinese.get("force_attack") == "强制攻击");
+    assert(chinese.get("unit_classification") == "生物单位-轻甲");
 
     gamedata::TerrainDatabase terrainDatabase;
     assert(terrainDatabase.load(contentRoot / "INI/Terrain.ini", error));
@@ -148,6 +149,8 @@ Inviso=yes
         const Rect tab = ui.rect("hud.production.tab." + std::to_string(index));
         assert(tab.width == tab.height);
     }
+    assert(ui.rect("hud.production.sidebar").width == 216.0F);
+    assert(ui.rect("hud.strategic.rail").width == 132.0F);
     for (int index = 0; index < 3; ++index) {
         const Rect producer = ui.rect("hud.production.producer." + std::to_string(index));
         assert(producer.width == producer.height);
@@ -375,8 +378,23 @@ Inviso=yes
         return std::pair{std::move(formation), std::move(signature)};
     };
     auto [sixFormation, sixSignature] = formationSignature(6);
-    auto sixRepeat = formationSignature(6);
-    assert(sixSignature == sixRepeat.second);
+    auto reservationSignature = [](const simulation::Simulation& formation) {
+        std::vector<std::pair<GridCoord, simulation::InfantrySubcell>> signature;
+        for (const auto& entity : formation.entities()) {
+            signature.emplace_back(entity.reservedCell, entity.reservedSubcell);
+        }
+        return signature;
+    };
+    bool sixPlacementVaried = false;
+    auto previousSixSignature = sixSignature;
+    for (int command = 0; command < 8 && !sixPlacementVaried; ++command) {
+        sixFormation.issueMove({8, 8});
+        const auto currentSignature = reservationSignature(sixFormation);
+        sixPlacementVaried = currentSignature != previousSixSignature;
+        previousSixSignature = currentSignature;
+    }
+    assert(sixPlacementVaried);
+    sixFormation.issueMove({8, 8});
     for (int step = 0; step < 600; ++step) {
         sixFormation.update(1.0F / 60.0F);
     }
@@ -414,13 +432,12 @@ Inviso=yes
         assert(std::abs(entity.position.y - std::get<2>(stable).y) < 0.001F);
         assert(entity.order.kind == CommandKind::None);
     }
-    // A second command to the same cell must reuse the released slots rather than
+    // A second command to the same cell must reallocate valid slots rather than
     // seeing stale reservations left behind by the first arrival.
     sixFormation.issueMove({8, 8});
-    for (std::size_t index = 0; index < sixSignature.size(); ++index) {
-        const auto& entity = sixFormation.entities()[index];
-        assert(std::make_pair(entity.reservedCell, entity.reservedSubcell) == sixSignature[index]);
-    }
+    const auto secondSixSignature = reservationSignature(sixFormation);
+    assert(std::all_of(secondSixSignature.begin(), secondSixSignature.end(),
+        [](const auto& reservation) { return reservation.second != simulation::InfantrySubcell::None; }));
     auto [nineFormation, nineSignature] = formationSignature(9);
     static_cast<void>(nineSignature);
     for (int step = 0; step < 600; ++step) {

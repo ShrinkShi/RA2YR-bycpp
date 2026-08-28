@@ -52,7 +52,7 @@ struct RenderScaleConfig {
 // unit scale stays independent so readability comes from the grid, not from
 // shrinking the infantry sprites. UI coordinates remain on the independent
 // 1920x1080 logical canvas.
-constexpr RenderScaleConfig kRenderScale{2.55F, 1.35F, 1.10F, 1.20F};
+constexpr RenderScaleConfig kRenderScale{3.10F, 1.35F, 1.10F, 1.20F};
 constexpr float kTileWidth = 48.0F * kRenderScale.worldRenderScale;
 constexpr float kTileHeight = 24.0F * kRenderScale.worldRenderScale;
 constexpr float kCameraEdgeThreshold = 22.0F;
@@ -2320,14 +2320,8 @@ private:
                     std::to_wstring(status.nextExperience) : L"经验：MAX";
                 renderer_.drawText(experience, ui_.childRect("hud.unitstatus", "hud.unitstatus.experience"), 12,
                     {0.72F, 0.84F, 0.86F, 1.0F});
-                std::wstring tags;
-                for (std::size_t index = 0; index < status.tags.size(); ++index) {
-                    if (index != 0) {
-                        tags += L" / ";
-                    }
-                    tags += utf8ToWide(status.tags[index]);
-                }
-                renderer_.drawText(tags, ui_.childRect("hud.unitstatus", "hud.unitstatus.tags"), 11,
+                renderer_.drawText(T("unit_classification"),
+                    ui_.childRect("hud.unitstatus", "hud.unitstatus.tags"), 11,
                     {0.72F, 0.84F, 0.86F, 1.0F});
 
                 renderer_.drawText(T("health") + L"：" + std::to_wstring(status.health) + L" / " +
@@ -2395,17 +2389,37 @@ private:
                         status.weapons[index].upgradeLevel);
                 }
                 if (!hoveredTooltip.empty()) {
-                    const Rect tooltip = ui_.childRect("hud.unitstatus", "hud.unitstatus.tooltip");
+                    std::size_t lineCount = 1;
+                    std::size_t currentLineLength = 0;
+                    std::size_t maxLineLength = 0;
+                    for (const wchar_t character : hoveredTooltip) {
+                        if (character == L'\n') {
+                            maxLineLength = std::max(maxLineLength, currentLineLength);
+                            currentLineLength = 0;
+                            ++lineCount;
+                        } else {
+                            ++currentLineLength;
+                        }
+                    }
+                    maxLineLength = std::max(maxLineLength, currentLineLength);
+                    const float tooltipWidth = std::clamp(
+                        static_cast<float>(maxLineLength) * 11.0F + 28.0F, 118.0F, 300.0F);
+                    const float tooltipHeight = static_cast<float>(lineCount) * 18.0F + 18.0F;
+                    // The cursor is the bottom-left anchor: the compact card grows
+                    // up and to the right, with an edge clamp only when necessary.
+                    Rect tooltip{mouse_.x + 12.0F, mouse_.y - tooltipHeight - 12.0F,
+                        tooltipWidth, tooltipHeight};
+                    tooltip.x = std::clamp(tooltip.x, 6.0F, kLogicalWidth - tooltip.width - 6.0F);
+                    tooltip.y = std::clamp(tooltip.y, 6.0F, kLogicalHeight - tooltip.height - 6.0F);
                     // Tooltip is a modal visual layer.  Its opaque backing
                     // must hide the status text underneath when the card is
                     // hovered, even if a mod supplies a translucent image.
                     renderer_.drawRect(tooltip, {0.008F, 0.010F, 0.014F, 0.98F});
                     renderer_.drawBorder(tooltip, {0.74F, 0.42F, 0.10F, 1.0F}, 2.0F);
                     renderer_.drawImage("ui.unitstatus.tooltip", tooltip);
-                    const Rect tooltipTextRelative = ui_.relativeRect("hud.unitstatus.tooltip.text");
                     renderer_.drawText(hoveredTooltip,
-                        {tooltip.x + tooltipTextRelative.x, tooltip.y + tooltipTextRelative.y,
-                            tooltipTextRelative.width, tooltipTextRelative.height}, 11,
+                        {tooltip.x + 14.0F, tooltip.y + 9.0F,
+                            tooltip.width - 28.0F, tooltip.height - 18.0F}, 11,
                         {1.0F, 0.92F, 0.62F, 1.0F}, false);
                 }
             }

@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <utility>
 
 namespace ra2yr::simulation {
@@ -454,24 +453,25 @@ void Simulation::issueMove(GridCoord destination) {
     };
     std::vector<SubcellLocation> availableSlots;
     for (int radius = 0; radius <= 32 && availableSlots.size() < infantryIds.size(); ++radius) {
+        std::vector<GridCoord> cells;
         for (int y = destination.y - radius; y <= destination.y + radius; ++y) {
             for (int x = destination.x - radius; x <= destination.x + radius; ++x) {
                 if (std::max(std::abs(x - destination.x), std::abs(y - destination.y)) != radius) {
                     continue;
                 }
-                // Add the complete cell before advancing to the next cell. This
-                // gives 6 infantry two cells and 9 infantry three cells.
-                for (int slot = 0; slot < 3; ++slot) {
-                    if (slotAvailable({x, y}, slot)) {
-                        availableSlots.push_back({{x, y}, static_cast<InfantrySubcell>(slot)});
-                    }
-                }
-                if (availableSlots.size() >= infantryIds.size()) {
-                    break;
-                }
+                cells.push_back({x, y});
             }
-            if (availableSlots.size() >= infantryIds.size()) {
-                break;
+        }
+        std::shuffle(cells.begin(), cells.end(), random_);
+        for (const GridCoord cell : cells) {
+            std::array<int, 3> slots{0, 1, 2};
+            std::shuffle(slots.begin(), slots.end(), random_);
+            // Keep each cell together as a three-slot formation, but randomize
+            // which adjacent cell receives overflow and which subcell is used.
+            for (const int slot : slots) {
+                if (slotAvailable(cell, slot)) {
+                    availableSlots.push_back({cell, static_cast<InfantrySubcell>(slot)});
+                }
             }
         }
     }
@@ -637,40 +637,36 @@ WorldCoord Simulation::subcellPosition(GridCoord cell, InfantrySubcell subcell) 
 }
 
 std::optional<Simulation::SubcellLocation> Simulation::findAvailableSubcell(GridCoord requested,
-    std::uint32_t entityId) const {
-    float bestDistance = std::numeric_limits<float>::max();
-    std::optional<SubcellLocation> best;
-    const WorldCoord requestedCenter = toWorld(requested);
+    std::uint32_t entityId) {
     for (int radius = 0; radius <= 8; ++radius) {
+        std::vector<GridCoord> cells;
         for (int y = requested.y - radius; y <= requested.y + radius; ++y) {
             for (int x = requested.x - radius; x <= requested.x + radius; ++x) {
                 if (std::max(std::abs(x - requested.x), std::abs(y - requested.y)) != radius) {
                     continue;
                 }
-                const auto it = infantryOccupancy_.find(cellKey({x, y}));
-                const auto reservation = infantryReservations_.find(cellKey({x, y}));
-                for (int slot = 0; slot < 3; ++slot) {
-                    const std::uint32_t occupant = it == infantryOccupancy_.end() ? 0 :
-                        it->second[static_cast<std::size_t>(slot)];
-                    const std::uint32_t reserved = reservation == infantryReservations_.end() ? 0 :
-                        reservation->second[static_cast<std::size_t>(slot)];
-                    if ((occupant != 0 && occupant != entityId) || (reserved != 0 && reserved != entityId)) {
-                        continue;
-                    }
-                    const InfantrySubcell candidate = static_cast<InfantrySubcell>(slot);
-                    const float candidateDistance = distance(subcellPosition({x, y}, candidate), requestedCenter);
-                    if (candidateDistance < bestDistance) {
-                        bestDistance = candidateDistance;
-                        best = SubcellLocation{{x, y}, candidate};
-                    }
-                }
+                cells.push_back({x, y});
             }
         }
-        if (best.has_value() && radius > 0) {
-            break;
+        std::shuffle(cells.begin(), cells.end(), random_);
+        for (const GridCoord cell : cells) {
+            const auto it = infantryOccupancy_.find(cellKey(cell));
+            const auto reservation = infantryReservations_.find(cellKey(cell));
+            std::array<int, 3> slots{0, 1, 2};
+            std::shuffle(slots.begin(), slots.end(), random_);
+            for (const int slot : slots) {
+                const std::uint32_t occupant = it == infantryOccupancy_.end() ? 0 :
+                    it->second[static_cast<std::size_t>(slot)];
+                const std::uint32_t reserved = reservation == infantryReservations_.end() ? 0 :
+                    reservation->second[static_cast<std::size_t>(slot)];
+                if ((occupant != 0 && occupant != entityId) || (reserved != 0 && reserved != entityId)) {
+                    continue;
+                }
+                return SubcellLocation{cell, static_cast<InfantrySubcell>(slot)};
+            }
         }
     }
-    return best;
+    return std::nullopt;
 }
 
 void Simulation::releaseOccupancy(Entity& entity) {
@@ -713,7 +709,7 @@ void Simulation::releaseReservation(Entity& entity) {
 }
 
 bool Simulation::reserveDestination(Entity& entity, GridCoord destination) {
-    if (!isInfantry(entity) || destination == entity.occupancyCell) {
+    if (!isInfantry(entity)) {
         return true;
     }
     const auto location = findAvailableSubcell(destination, entity.id);
