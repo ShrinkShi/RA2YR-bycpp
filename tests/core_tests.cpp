@@ -73,7 +73,7 @@ Inviso=yes
     assert(rules.e2().faction == Faction::Soviet);
     assert(rules.e2().unitTags.size() == 2 && rules.e2().unitTags[0] == "Biological" &&
         rules.e2().unitTags[1] == "Infantry");
-    assert(std::abs(rules.e2().selectionRadius - 0.30F) < 0.001F);
+    assert(std::abs(rules.e2().selectionRadius - 0.22F) < 0.001F);
     assert(rules.e2().occupancyProfile == "Infantry");
     assert(rules.e2().voiceSelect == "E2Select" && rules.e2().voiceMove == "E2Move" &&
         rules.e2().voiceAttack == "E2Attack");
@@ -163,10 +163,11 @@ Inviso=yes
         assert(std::abs(product.width / product.height - 0.87F) < 0.01F);
     }
     assert(ui.rect("hud.production.product.9").y > ui.rect("hud.production.product.7").y);
-    const Rect metrics = ui.childRect("hud.unitstatus", "hud.unitstatus.metrics");
-    assert(metrics.width == 700.0F && metrics.height == 28.0F);
-    assert(ui.childRect("hud.unitstatus", "hud.unitstatus.kills").y == metrics.y);
-    assert(ui.childRect("hud.unitstatus", "hud.unitstatus.veterancy").y == metrics.y);
+    const Rect kills = ui.childRect("hud.unitstatus", "hud.unitstatus.kills");
+    const Rect veterancyRect = ui.childRect("hud.unitstatus", "hud.unitstatus.veterancy");
+    assert(kills.width == 700.0F && kills.height == 22.0F);
+    assert(veterancyRect.width == 700.0F && veterancyRect.height == 22.0F);
+    assert(kills.x == veterancyRect.x && kills.y < veterancyRect.y);
     const Rect assetIcon = ui.relativeRect("sandbox.asset.icon.0");
     const Rect assetLabel = ui.relativeRect("sandbox.asset.label.0");
     assert(assetIcon.width > 0.0F && assetIcon.height > 0.0F);

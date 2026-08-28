@@ -946,6 +946,12 @@ private:
                 break;
             case SDL_EVENT_MOUSE_MOTION:
                 mouse_ = logicalMouse(event.motion.x, event.motion.y);
+                if (minimapDragging_) {
+                    if (const std::optional<WorldCoord> minimapWorld = minimapWorldAt(mouse_);
+                        minimapWorld.has_value()) {
+                        camera_.worldCenter = *minimapWorld;
+                    }
+                }
                 if (rightMouseDown_ && mode_ == AppMode::EditorSandbox && !hasSelectedUnits()) {
                     const ScreenCoord delta{mouse_.x - rightMousePosition_.x,
                         mouse_.y - rightMousePosition_.y};
@@ -1151,6 +1157,15 @@ private:
             }
             return;
         }
+        if (pendingAction_ == PendingAction::None) {
+            if (const std::optional<WorldCoord> minimapWorld = minimapWorldAt(mouse_);
+                minimapWorld.has_value()) {
+                minimapDragging_ = true;
+                camera_.worldCenter = *minimapWorld;
+                audio_.play(AudioCue::UIClick);
+                return;
+            }
+        }
         if (handleEditorUiClick()) {
             return;
         }
@@ -1185,6 +1200,10 @@ private:
                 activateMenuButton(static_cast<std::size_t>(pressedMenuButton_));
             }
             pressedMenuButton_ = -1;
+            return;
+        }
+        if (minimapDragging_) {
+            minimapDragging_ = false;
             return;
         }
         if (sandboxPaletteDragging_) {
@@ -1614,10 +1633,10 @@ private:
             // testing. Infantry pivots can be offset substantially from the
             // ground point; centering the hit box on the anchor made clicks
             // on the rendered body miss while still affecting nearby ground.
-            const float hitWidth = std::clamp(bounds.width * 0.85F,
-                18.0F * camera_.zoom, 42.0F * camera_.zoom);
-            const float hitHeight = std::clamp(bounds.height * 0.85F,
-                24.0F * camera_.zoom, 72.0F * camera_.zoom);
+            const float hitWidth = std::clamp(bounds.width * 0.70F,
+                14.0F * camera_.zoom, 34.0F * camera_.zoom);
+            const float hitHeight = std::clamp(bounds.height * 0.70F,
+                20.0F * camera_.zoom, 58.0F * camera_.zoom);
             const Rect hitBounds{bounds.x + (bounds.width - hitWidth) * 0.5F,
                 bounds.y + (bounds.height - hitHeight) * 0.5F, hitWidth, hitHeight};
             if (hitBounds.contains(position.x, position.y)) {
@@ -1640,7 +1659,7 @@ private:
                 continue;
             }
             const float candidate = distance(entity.position, position);
-            const float hitRadius = std::max(0.55F, entity.selectionRadius * 1.8F);
+            const float hitRadius = std::max(0.20F, entity.selectionRadius * 1.35F);
             if (candidate <= hitRadius && candidate < closest) {
                 closest = candidate;
                 result = entity.id;
@@ -2258,7 +2277,7 @@ private:
             renderer_.drawImage("ui.hud.tab", producer, {0.55F, 0.55F, 0.58F, 1.0F});
             renderer_.drawText(L"--", producer, 18, {0.42F, 0.44F, 0.48F, 1.0F});
         }
-        for (int index = 0; index < 6; ++index) {
+        for (int index = 0; index < 10; ++index) {
             const Rect product = ui_.rect("hud.production.product." + std::to_string(index));
             renderer_.drawImage("ui.hud.button", product, {0.42F, 0.44F, 0.46F, 1.0F});
             if (index < static_cast<int>(kProductionProductAssets.size())) {
@@ -2323,13 +2342,11 @@ private:
                 renderer_.drawText(utf8ToWide(secondaryName),
                     ui_.childRect("hud.unitstatus", "hud.unitstatus.secondary"), 13,
                     {0.70F, 0.76F, 0.78F, 1.0F});
-                const Rect metrics = ui_.childRect("hud.unitstatus", "hud.unitstatus.metrics");
-                const Rect kills = {metrics.x, metrics.y, metrics.width * 0.5F, metrics.height};
-                const Rect veterancy = {metrics.x + metrics.width * 0.5F, metrics.y,
-                    metrics.width * 0.5F, metrics.height};
-                renderer_.drawText(L"击杀：" + std::to_wstring(status.kills), kills, 13,
+                renderer_.drawText(L"击杀：" + std::to_wstring(status.kills),
+                    ui_.childRect("hud.unitstatus", "hud.unitstatus.kills"), 13,
                     {0.92F, 0.86F, 0.36F, 1.0F});
-                renderer_.drawText(L"等级：" + utf8ToWide(veterancyName), veterancy, 13,
+                renderer_.drawText(L"等级：" + utf8ToWide(veterancyName),
+                    ui_.childRect("hud.unitstatus", "hud.unitstatus.veterancy"), 13,
                     {0.92F, 0.86F, 0.36F, 1.0F});
                 const std::wstring experience = status.nextExperience > 0 ?
                     L"经验：" + std::to_wstring(status.experience) + L" / " +
@@ -2441,31 +2458,30 @@ private:
             }
         }
 
-        if (selected != nullptr) {
-            const Rect card = ui_.rect("hud.command_card");
-            // The formal command-card skin has no title strip; all fifteen cells
-            // are square rects from UI.ini and use the same data for hit testing.
-            renderer_.drawImage("ui.hud.commandcard.background", card);
-            if (pendingAction_ != PendingAction::None) {
-                renderer_.drawText(T("target") + L"：" + pendingActionLabel(),
-                    ui_.childRect("hud.command_card", "hud.command_card.target"), 12,
-                    {1.0F, 0.34F, 0.18F, 1.0F}, false);
-            }
-            const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "force_attack", "", "", "", "", "", "", "", "", ""};
-            for (int slot = 0; slot < 15; ++slot) {
-                const Rect button = ui_.childRect("hud.command_card",
-                    "hud.command_card.slot." + std::to_string(slot));
-                const bool hot = button.contains(mouse_.x, mouse_.y);
-                const bool active = (slot == 0 && pendingAction_ == PendingAction::Move) ||
+        const Rect card = ui_.rect("hud.command_card");
+        // The command card remains visible as an empty, non-interactive panel
+        // when no unit is selected. Its cells and hitboxes share UI.ini rects.
+        renderer_.drawImage("ui.hud.commandcard.background", card);
+        if (selected != nullptr && pendingAction_ != PendingAction::None) {
+            renderer_.drawText(T("target") + L"：" + pendingActionLabel(),
+                ui_.childRect("hud.command_card", "hud.command_card.target"), 12,
+                {1.0F, 0.34F, 0.18F, 1.0F}, false);
+        }
+        const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "force_attack", "", "", "", "", "", "", "", "", ""};
+        for (int slot = 0; slot < 15; ++slot) {
+            const Rect button = ui_.childRect("hud.command_card",
+                "hud.command_card.slot." + std::to_string(slot));
+            const bool hot = selected != nullptr && button.contains(mouse_.x, mouse_.y);
+            const bool active = selected != nullptr &&
+                ((slot == 0 && pendingAction_ == PendingAction::Move) ||
                     (slot == 3 && pendingAction_ == PendingAction::Patrol) ||
                     (slot == 4 && pendingAction_ == PendingAction::AttackMove) ||
-                    (slot == 5 && pendingAction_ == PendingAction::ForceAttack);
-                renderer_.drawImage(hot || active ? "ui.hud.button_hover" : "ui.hud.button", button,
-                    active ? Color{1.0F, 0.78F, 0.38F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
-                if (!commandKeys[slot].empty()) {
-                    const int fontSize = slot == 4 ? 9 : slot == 5 ? 10 : 13;
-                    renderer_.drawText(T(commandKeys[slot]), button, fontSize, {1.0F, 0.84F, 0.26F, 1.0F});
-                }
+                    (slot == 5 && pendingAction_ == PendingAction::ForceAttack));
+            renderer_.drawImage(hot || active ? "ui.hud.button_hover" : "ui.hud.button", button,
+                active ? Color{1.0F, 0.78F, 0.38F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
+            if (selected != nullptr && !commandKeys[slot].empty()) {
+                const int fontSize = slot == 4 ? 9 : slot == 5 ? 10 : 13;
+                renderer_.drawText(T(commandKeys[slot]), button, fontSize, {1.0F, 0.84F, 0.26F, 1.0F});
             }
         }
 
@@ -2539,6 +2555,7 @@ private:
     bool leftMouseDown_ = false;
     bool rightMouseDown_ = false;
     bool rightMouseDragged_ = false;
+    bool minimapDragging_ = false;
     bool dragging_ = false;
     bool strategicCollapsed_ = false;
     bool sandboxPaletteVisible_ = true;
