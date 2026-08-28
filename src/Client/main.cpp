@@ -1269,8 +1269,8 @@ private:
         layout.ownerLabel = child("sandbox.owner");
         layout.redButton = child("sandbox.red");
         layout.blueButton = child("sandbox.blue");
-        for (int index = 0; index < 10; ++index) {
-            layout.toolButtons[static_cast<std::size_t>(index)] = child("sandbox.tool." + std::to_string(index));
+        for (std::size_t index = 0; index < layout.toolButtons.size(); ++index) {
+            layout.toolButtons[index] = child("sandbox.tool." + std::to_string(index));
         }
         for (int index = 0; index < 6; ++index) {
             layout.assetCards[static_cast<std::size_t>(index)] = child(
