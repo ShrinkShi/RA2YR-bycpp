@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cmath>
 
@@ -135,6 +136,60 @@ struct Rect {
     }
 };
 
+// Fits the same isometric basis used by the world camera into a minimap
+// rectangle. This keeps terrain, units, and camera viewport geometry in one
+// coordinate system while preserving the map's diamond aspect ratio.
+struct IsoMapProjection {
+    IsoProjection basis{};
+    float mapWidth = 1.0F;
+    float mapHeight = 1.0F;
+    Rect field{};
+    float minX = 0.0F;
+    float maxX = 1.0F;
+    float minY = 0.0F;
+    float maxY = 1.0F;
+    float scale = 1.0F;
+
+    IsoMapProjection(float width, float height, Rect targetField, IsoProjection mapBasis = {})
+        : basis(mapBasis), mapWidth(std::max(1.0F, width)), mapHeight(std::max(1.0F, height)),
+          field(targetField) {
+        const std::array<WorldCoord, 4> corners = {
+            WorldCoord{0.0F, 0.0F}, WorldCoord{mapWidth, 0.0F},
+            WorldCoord{mapWidth, mapHeight}, WorldCoord{0.0F, mapHeight}};
+        minX = maxX = basis.toScreenVector(corners[0]).x;
+        minY = maxY = basis.toScreenVector(corners[0]).y;
+        for (const WorldCoord corner : corners) {
+            const ScreenCoord projected = basis.toScreenVector(corner);
+            minX = std::min(minX, projected.x);
+            maxX = std::max(maxX, projected.x);
+            minY = std::min(minY, projected.y);
+            maxY = std::max(maxY, projected.y);
+        }
+        const float extentWidth = std::max(0.001F, maxX - minX);
+        const float extentHeight = std::max(0.001F, maxY - minY);
+        const float availableWidth = std::max(0.001F, field.width - 4.0F);
+        const float availableHeight = std::max(0.001F, field.height - 4.0F);
+        scale = std::min(availableWidth / extentWidth, availableHeight / extentHeight);
+    }
+
+    [[nodiscard]] ScreenCoord project(WorldCoord world) const {
+        const ScreenCoord source = basis.toScreenVector(world);
+        const float sourceCenterX = (minX + maxX) * 0.5F;
+        const float sourceCenterY = (minY + maxY) * 0.5F;
+        return {field.x + field.width * 0.5F + (source.x - sourceCenterX) * scale,
+            field.y + field.height * 0.5F + (source.y - sourceCenterY) * scale};
+    }
+
+    [[nodiscard]] WorldCoord unproject(ScreenCoord screen) const {
+        const float sourceCenterX = (minX + maxX) * 0.5F;
+        const float sourceCenterY = (minY + maxY) * 0.5F;
+        const ScreenCoord source{
+            sourceCenterX + (screen.x - (field.x + field.width * 0.5F)) / scale,
+            sourceCenterY + (screen.y - (field.y + field.height * 0.5F)) / scale};
+        return basis.toWorldVector(source);
+    }
+};
+
 enum class Owner : std::uint8_t {
     Neutral,
     Red,
@@ -156,6 +211,7 @@ enum class CommandKind : std::uint8_t {
     Patrol,
     AttackMove,
     Attack,
+    ForceAttack,
 };
 
 struct Command {

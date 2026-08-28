@@ -161,3 +161,83 @@
 - 复核现有 UI layout/image 分离设计，在 `INI/UI.ini` 增加九个正式面板主题图片映射。
 - 新增并构建复制 `assets/ui/themes/ra2_soviet/hud/*.png` 与 `editor/sandbox.png`；正式面板外壳改由 `renderer.drawImage` 使用这些主题素材。
 - 增加默认主题图片路径回归断言，完成 configure、MSVC compile/link、CTest 和实际 EXE 响应检查；未触碰独立 corpus worktree，未新增 Gameplay 范围。
+
+## 2026-08-27 - PR #2 第二轮 Editor Tools and Unit Status
+
+### 用户目标
+- 从 PR #1 合并后的最新 `origin/main` 建立新分支，继续保持 Draft PR，不修改 main、不混入 corpus worktree。
+- 只实现正式 Editor Tool System 和 Unit Status / Information Panel，使用 E2 作为唯一玩法验证对象。
+
+### 本轮处理
+- 新增 `TerrainDatabase`、`TerrainMap`、`EditorToolState` 和 `EditorToolController`，支持六种工具、Terrain/Unit 类别、Void、笔刷、填充、取色、真实 Simulation 放置/删除和 occupancy 校验。
+- 扩展 Rules 单位注册表、UIName、副名称、护甲/武器卡、经验/军阶和可选护盾/能量数据；新增 `VeterancyDatabase` 与 `UnitStatusViewModel`。
+- 将正式工具窗口和 Unit Status 内容接入现有 UI.ini rect/theme 体系；新增 Terrain.ini、Editor.ini、项目自有工具/卡片图标和第二轮设计文档。
+
+### 范围边界
+- 未新增第二单位、生产、经济、AI、Trigger、多人、真实 MAP/TMP 或复杂 Editor 绘图工具。
+- corpus worktree 仍保持独立，Development Sandbox 继续使用仓库自有 INI/assets。
+
+### 验证计划
+- 重新执行自动发现 VS 的 configure/build、CTest 和真实 EXE 启动；截图作为运行证据，不代替人工视觉/交互验收。
+
+### 最终验证补充
+- 重新 fetch 后 `origin/main` 仍为 `1c077e44399721d7f567993d422c7b507504f90c`；旧 PR #1 分支仍为 `96b9b8493e924db9a612442e84f4691fd6f54ca1`。
+- 官方 `tools/dev/setup.ps1`、`build.ps1` 和 `test.ps1` 完成；MSVC x64、CMake 4.4.2、Ninja 1.13.2、独立 `E:\Tools\vcpkg`，CTest `1/1 PASS`。
+- 最新 `ra2yr_client.exe` 实际启动且未立即退出；日志确认 D3D11/SDL、Rules/Art、CONS.SHP、unittem.pal 和三组 E2 VoiceSet 加载。窗口截图保存在被忽略的 `artifacts/round2-validation/`，只作为运行证据，不宣称人工验收通过。
+
+## 2026-08-27 - PR #2 编队与 UI 几何最终验证
+
+- 仅在 canonical checkout `E:\时锐\RA2\RA2YR-bycpp` 继续修复；重新 fetch 后 PR #2 远端 HEAD 为 `e3adeb48ecc001ee477d4cf86e560f1b61a33e02`，`origin/main` 为 `1c077e44399721d7f567993d422c7b507504f90c`。
+- 补齐 Sandbox asset card 的 icon/label parent-relative Rect，修复单位抵达后 stale reservation 未从 reservation map 释放的问题，并增加同目标二次编队回归检查。
+- 重新执行 CMake configure、MSVC build/link、CTest 和实际 EXE 启动；采集主菜单、Editor、F3 occupancy、Unit Status 运行截图，保留为人工复核证据，不宣称人工验收通过。
+
+## 2026-08-27 - PR #2 编队完成与等距 UI 收口
+
+- 在 canonical checkout 继续工作；先核对 PR #2 远端 HEAD 为 `7d8da8ceae8517f57a01979a9dd170e1ed9fe089`，未使用旧 worktree。
+- 修复 Move/AttackMove 抵达后仍使用原始点击格的回退路径；6/9 infantry 回归测试在抵达后继续模拟 5 秒，验证 occupancy/subcell/position/order 稳定。
+- Sandbox 改用紧凑 RA2/Soviet 控件皮肤、tab 和真实资产卡；Unit Status 使用统一 `hud.unitstatus` 外框；Minimap 改为共享等距菱形投影和四角相机视口多边形。
+- preset configure、自动发现 VS Developer 环境下的 MSVC build/link、CTest 和实际 EXE 启动均完成；截图只作为运行证据，不代替用户人工验收。
+
+## 2026-08-27 - 编辑器视觉收口与运行复核
+
+### 用户目标
+- 让测试地块清楚呈现单格边界；修正高密度 Infantry 的可读性；按参考图收紧异形 HUD、2:3 头像区、固定方形 3x5 Command Card、左收战略栏、SHP 生产图标、两列空产能栏，并去除 Sandbox 英文。
+- 继续使用 PR #2 的 `feature/editor-tools-and-unit-info`，不新增 Gameplay 范围，不混入独立 corpus 或用户资料。
+
+### 本轮处理
+- 更新 `INI/UI.ini` 与客户端渲染布局，使用高对比水泥等距格和黑色世界边线；扩大 Command Card/Minimap，高度与 3x5 方格由配置驱动。
+- 增加 RA2/YR 生产分类 SHP 图标加载和两列禁用产品槽；战略栏折叠命中框随状态切换，并将 Sandbox 可见文本和窗口标题本地化为中文。
+- 增加/更新回归断言，覆盖 HUD 高度、方形 minimap field、2:3 portrait、15 个方形 Command Card slot；运行压力场景采集截图。
+
+### 关键结论
+- UI rect、绘制和命中测试仍保持同一份 `UI.ini` 数据来源；本轮只添加视觉与布局收口，不引入生产实体或新单位。
+- 本地截图和参考资料保留在工作区，生产 SHP 与来源说明才进入本轮提交。
+
+### 影响文件
+- `INI/Terrain.ini`
+- `INI/UI.ini`
+- `assets/ui/strings.ini`
+- `assets/game/ra2/production/*.shp`
+- `src/Client/main.cpp`
+- `src/Renderer/D3D11Renderer.cpp`
+- `src/Simulation/Simulation.cpp`
+- `tests/core_tests.cpp`
+- `docs/FIRST_PLAYABLE_EDITOR_SLICE.md`
+- `docs/THIRD_PARTY_ASSETS.md`
+
+### 后续事项
+- 等待用户对本轮运行截图进行最终视觉/交互验收；不把自动化运行证据表述为人工验收通过。
+
+## 2026-08-28 - UI 收口与本地化
+
+- 重新 fetch 并确认 PR #2 分支远端 HEAD 为 `214d30c852bdbd46cbe28cd101c9f950f71624be`，`origin/main` 为 `1c077e44399721d7f567993d422c7b507504f90c`。
+- 提取用户本机 RA2 资源包中的 `sidec01/tab00`–`tab03` 与 `sidebar.pal`，替换生产分类栏的错误建筑整图，并缩窄生产栏、保持两列产品槽。
+- 重排异形底部 HUD，强化水泥测试格黑边，修正单位信息字体/居中和不透明悬浮层。
+- 新增 ForceAttack/K 与地面/单位目标指示线；新增 locale JSON 运行时加载和 Settings 语言/音量 UI；移除项目 Rules/Terrain 的内嵌 UIName。
+- 下一步执行干净 configure、MSVC build/link、CTest、EXE 启动与运行截图，再审查 diff 后提交并推送 PR #2，保持 Draft。
+
+## 2026-08-28 - 最终运行复核与提交前收口
+
+- 修复高 DPI/最大化窗口的 D3D viewport 像素尺寸适配；收紧生产栏两列产品格，强化水泥测试格黑色单元边界，并把初始镜头对准现有四个演示单位。
+- 补齐 `terrain.DIRT.name` 双语 locale；确认沙盒显示不再出现 `DIRT` 英文。
+- 重新完成 configure、MSVC build/link、CTest 与实际 EXE 启动；记录主菜单、Editor Sandbox、F3 Debug Overlay 运行截图，保留人工复核但不宣称人工验收通过。

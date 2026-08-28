@@ -18,6 +18,8 @@ find_package(SDL3 CONFIG REQUIRED)
 
 add_library(ra2yr_core
     src/Engine/Core/Types.h
+    src/Engine/Core/Utf.cpp
+    src/Engine/Core/Utf.h
     src/Westwood/Ini/Ini.cpp
     src/Westwood/Ini/Ini.h
     src/Westwood/Palette/Palette.cpp
@@ -28,8 +30,22 @@ add_library(ra2yr_core
     src/GameData/Art.h
     src/GameData/Rules.cpp
     src/GameData/Rules.h
+    src/GameData/Localization.cpp
+    src/GameData/Localization.h
+    src/GameData/Terrain.cpp
+    src/GameData/Terrain.h
     src/GameData/UI.cpp
     src/GameData/UI.h
+    src/GameData/Veterancy.cpp
+    src/GameData/Veterancy.h
+    src/Editor/EditorToolController.cpp
+    src/Editor/EditorToolController.h
+    src/Editor/EditorToolState.cpp
+    src/Editor/EditorToolState.h
+    src/Editor/TerrainMap.cpp
+    src/Editor/TerrainMap.h
+    src/Client/Hud/UnitStatusViewModel.cpp
+    src/Client/Hud/UnitStatusViewModel.h
     src/Simulation/Simulation.cpp
     src/Simulation/Simulation.h
 )

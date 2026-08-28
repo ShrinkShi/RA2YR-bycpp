@@ -31,11 +31,14 @@ public:
     [[nodiscard]] bool hasImage(std::string_view key) const;
     [[nodiscard]] std::filesystem::path imagePath(std::string_view key,
         const std::filesystem::path& contentRoot) const;
+    [[nodiscard]] float setting(std::string_view section, std::string_view key,
+        float fallback = 0.0F) const;
 
 private:
     UiThemeDefinition theme_;
     std::unordered_map<std::string, Rect> rects_;
     std::unordered_map<std::string, Rect> relativeRects_;
+    std::unordered_map<std::string, float> settings_;
     bool loaded_ = false;
 };
 

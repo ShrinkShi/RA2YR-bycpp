@@ -1,17 +1,27 @@
 #include "GameData/Art.h"
+#include "Engine/Core/Utf.h"
 #include "GameData/Rules.h"
+#include "GameData/Localization.h"
+#include "GameData/Terrain.h"
 #include "GameData/UI.h"
+#include "GameData/Veterancy.h"
+#include "Editor/EditorToolController.h"
+#include "Client/Hud/UnitStatusViewModel.h"
 #include "Westwood/Palette/Palette.h"
 #include "Simulation/Simulation.h"
 #include "Westwood/Ini/Ini.h"
 #include "Westwood/Shp/Shp.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 int main() {
@@ -63,27 +73,114 @@ Inviso=yes
     assert(rules.e2().faction == Faction::Soviet);
     assert(rules.e2().unitTags.size() == 2 && rules.e2().unitTags[0] == "Biological" &&
         rules.e2().unitTags[1] == "Infantry");
-    assert(std::abs(rules.e2().selectionRadius - 0.30F) < 0.001F);
+    assert(std::abs(rules.e2().selectionRadius - 0.11F) < 0.001F);
     assert(rules.e2().occupancyProfile == "Infantry");
     assert(rules.e2().voiceSelect == "E2Select" && rules.e2().voiceMove == "E2Move" &&
         rules.e2().voiceAttack == "E2Attack");
     assert(rules.e2().primary.projectile == "InvisibleLow");
+    assert(rules.e2().uiNameKey == "cons");
+    assert(rules.e2().secondaryUiNameKey == "soviet_infantry");
+    assert(rules.e2().weapons.size() == 1 && rules.e2().weapons.front().uiNameKey == "M1");
+
+    gamedata::LocalizationDatabase chinese;
+    gamedata::LocalizationDatabase english;
+    assert(chinese.load(contentRoot / "assets/ui/locales/zh_cn.json", error));
+    assert(english.load(contentRoot / "assets/ui/locales/en_us.json", error));
+    assert(chinese.get("UIName.cons") == "动员兵");
+    assert(english.get("UIName.cons") == "CONSCRIPT");
+    assert(chinese.get("UIName.M1") == "M1卡宾枪");
+    assert(chinese.get("UIName.light_armor") == "轻型装甲");
+    assert(chinese.get("UIName.rookie") == "新兵");
+    assert(chinese.get("force_attack") == "强制攻击");
+    assert(chinese.get("unit_classification") == "生物单位-轻甲");
+
+    gamedata::TerrainDatabase terrainDatabase;
+    assert(terrainDatabase.load(contentRoot / "INI/Terrain.ini", error));
+    assert(terrainDatabase.find("GRASS") != nullptr);
+    assert(terrainDatabase.find("GRASS")->passable && terrainDatabase.find("GRASS")->buildable);
+    gamedata::VeterancyDatabase veterancy;
+    assert(veterancy.load(rulesPath, error));
+    assert(veterancy.find("Standard") != nullptr);
+    assert(veterancy.level("Standard", 0)->id == "Rookie");
+    assert(veterancy.level("Standard", 50)->id == "Veteran");
+    assert(veterancy.nextLevel("Standard", 50)->id == "Elite");
 
     gamedata::UiLayoutDatabase ui;
     assert(ui.load(contentRoot / "INI/UI.ini", error));
     assert(ui.theme().skin.name == "ra2_soviet");
-    const std::array<const char*, 9> formalPanelImages = {
-        "ui.hud.background", "ui.hud.minimap.background", "ui.hud.model.background",
-        "ui.hud.unitinfo.background", "ui.hud.portrait.background", "ui.hud.commandcard.background",
-        "ui.hud.production.background", "ui.hud.strategic.background", "ui.editor.sandbox.background",
+    const std::array<const char*, 19> formalPanelImages = {
+        "ui.hud.background", "ui.hud.minimap.background", "ui.hud.unitstatus.background",
+        "ui.hud.portrait.background",
+        "ui.hud.commandcard.background", "ui.hud.production.background", "ui.hud.strategic.background",
+        "ui.editor.sandbox.background", "ui.editor.button.normal", "ui.editor.button.hover",
+        "ui.editor.button.active", "ui.editor.tab.normal", "ui.editor.tab.active",
+        "ui.editor.asset.normal", "ui.editor.asset.hover", "ui.editor.asset.active",
+        "ui.editor.dropdown", "ui.editor.separator", "ui.unitstatus.card",
     };
     for (const char* imageId : formalPanelImages) {
         assert(ui.hasImage(imageId));
         assert(std::filesystem::exists(ui.imagePath(imageId, contentRoot)));
     }
-    const Rect commandSlot = ui.childRect("hud.command_card", "hud.command_card.slot.0");
-    assert(commandSlot.x == ui.rect("hud.command_card").x + 5.0F);
-    assert(commandSlot.y == ui.rect("hud.command_card").y + 28.0F);
+    assert(ui.rect("hud.unitstatus").width > 600.0F);
+    assert(ui.childRect("hud.unitstatus", "hud.unitstatus.preview").x ==
+        ui.rect("hud.unitstatus").x + 30.0F);
+    assert(ui.childRect("hud.unitstatus", "hud.unitstatus.name").x ==
+        ui.rect("hud.unitstatus").x + 310.0F);
+    assert(ui.childRect("hud.unitstatus", "hud.unitstatus.preview").width > 0.0F);
+    assert(ui.relativeRect("hud.unitstatus.card.badge").width > 0.0F);
+    assert(ui.imagePath("ui.hud.unitstatus.background", contentRoot).filename() == "unitstatus_clean.png");
+    const Rect commandPanel = ui.rect("hud.command_card");
+    const Rect minimapPanel = ui.rect("hud.minimap");
+    const Rect minimapUiField = ui.childRect("hud.minimap", "minimap.field");
+    const Rect portraitPanel = ui.rect("hud.portrait");
+    const Rect portraitViewport = ui.rect("hud.portrait.viewport");
+    assert(commandPanel.height > ui.rect("hud.unitstatus").height);
+    assert(commandPanel.height == minimapPanel.height);
+    assert(minimapUiField.width == minimapUiField.height);
+    assert(minimapPanel.x + minimapPanel.width == ui.rect("hud.unitstatus").x);
+    assert(ui.rect("hud.unitstatus").x + ui.rect("hud.unitstatus").width == portraitPanel.x);
+    assert(portraitPanel.x + portraitPanel.width == commandPanel.x);
+    assert(std::abs(portraitPanel.width / portraitPanel.height - (2.0F / 3.0F)) < 0.001F);
+    assert(std::abs(portraitViewport.width / portraitViewport.height - (2.0F / 3.0F)) < 0.001F);
+    assert(ui.setting("HUD.UnitStatus", "CardWidth", 0.0F) ==
+        ui.setting("HUD.UnitStatus", "CardHeight", 0.0F));
+    for (int slot = 0; slot < 15; ++slot) {
+        const Rect commandSlot = ui.childRect("hud.command_card",
+            "hud.command_card.slot." + std::to_string(slot));
+        assert(commandSlot.width == commandSlot.height);
+        assert(commandSlot.x >= commandPanel.x && commandSlot.y >= commandPanel.y);
+        assert(commandSlot.x + commandSlot.width <= commandPanel.x + commandPanel.width);
+        assert(commandSlot.y + commandSlot.height <= commandPanel.y + commandPanel.height);
+    }
+    for (int index = 0; index < 4; ++index) {
+        const Rect tab = ui.rect("hud.production.tab." + std::to_string(index));
+        assert(tab.width == tab.height);
+    }
+    assert(ui.rect("hud.production.sidebar").width == 216.0F);
+    assert(ui.rect("hud.strategic.rail").width == 132.0F);
+    for (int index = 0; index < 3; ++index) {
+        const Rect producer = ui.rect("hud.production.producer." + std::to_string(index));
+        assert(producer.width == producer.height);
+    }
+    for (int index = 0; index < 10; ++index) {
+        const Rect product = ui.rect("hud.production.product." + std::to_string(index));
+        assert(std::abs(product.width / product.height - 0.87F) < 0.01F);
+    }
+    assert(ui.rect("hud.production.product.9").y > ui.rect("hud.production.product.7").y);
+    const Rect kills = ui.childRect("hud.unitstatus", "hud.unitstatus.kills");
+    const Rect veterancyRect = ui.childRect("hud.unitstatus", "hud.unitstatus.veterancy");
+    assert(kills.width == 700.0F && kills.height == 22.0F);
+    assert(veterancyRect.width == 700.0F && veterancyRect.height == 22.0F);
+    assert(kills.x == veterancyRect.x && kills.y < veterancyRect.y);
+    const Rect assetIcon = ui.relativeRect("sandbox.asset.icon.0");
+    const Rect assetLabel = ui.relativeRect("sandbox.asset.label.0");
+    assert(assetIcon.width > 0.0F && assetIcon.height > 0.0F);
+    assert(assetLabel.width == ui.relativeRect("sandbox.asset.card.0").width);
+    assert(std::abs(ui.setting("HUD.UnitStatus", "HealthyThreshold") - 0.60F) < 0.001F);
+    assert(std::abs(ui.setting("HUD.UnitStatus", "CriticalThreshold") - 0.30F) < 0.001F);
+    assert(std::abs(ui.setting("HUD.UnitStatus", "CardColumns") - 5.0F) < 0.001F);
+    assert(utf8ToWide("动员兵") == L"动员兵");
+    assert(wideToUtf8(L"轻型装甲") == "轻型装甲");
 
     westwood::IniDocument voices;
     assert(voices.load(contentRoot / "assets/audio/voices.ini", error));
@@ -274,6 +371,132 @@ Inviso=yes
         }
     }
 
+    const auto formationSignature = [&](std::size_t count) {
+        simulation::Simulation formation(animationDefinition);
+        std::vector<std::uint32_t> ids;
+        for (std::size_t index = 0; index < count; ++index) {
+            const std::uint32_t id = formation.spawn(infantryDefinition, Owner::Red,
+                {static_cast<int>(index) * 2, 2});
+            assert(id != 0);
+            ids.push_back(id);
+            formation.find(id)->selected = true;
+        }
+        formation.issueMove({8, 8});
+        std::vector<std::pair<GridCoord, simulation::InfantrySubcell>> signature;
+        for (const std::uint32_t id : ids) {
+            const auto* entity = formation.find(id);
+            assert(entity != nullptr && entity->reservedSubcell != simulation::InfantrySubcell::None);
+            signature.emplace_back(entity->reservedCell, entity->reservedSubcell);
+        }
+        return std::pair{std::move(formation), std::move(signature)};
+    };
+    auto [sixFormation, sixSignature] = formationSignature(6);
+    auto reservationSignature = [](const simulation::Simulation& formation) {
+        std::vector<std::pair<GridCoord, simulation::InfantrySubcell>> signature;
+        for (const auto& entity : formation.entities()) {
+            signature.emplace_back(entity.reservedCell, entity.reservedSubcell);
+        }
+        return signature;
+    };
+    bool sixPlacementVaried = false;
+    auto previousSixSignature = sixSignature;
+    for (int command = 0; command < 8 && !sixPlacementVaried; ++command) {
+        sixFormation.issueMove({8, 8});
+        const auto currentSignature = reservationSignature(sixFormation);
+        sixPlacementVaried = currentSignature != previousSixSignature;
+        previousSixSignature = currentSignature;
+    }
+    assert(sixPlacementVaried);
+    sixFormation.issueMove({8, 8});
+    for (int step = 0; step < 600; ++step) {
+        sixFormation.update(1.0F / 60.0F);
+    }
+    std::map<std::pair<int, int>, int> sixCells;
+    std::map<std::pair<int, int>, std::array<bool, 3>> sixSubcells;
+    for (const auto& entity : sixFormation.entities()) {
+        sixCells[{entity.occupancyCell.x, entity.occupancyCell.y}]++;
+        const auto slot = static_cast<std::size_t>(entity.occupancySubcell);
+        assert(slot < 3U);
+        sixSubcells[{entity.occupancyCell.x, entity.occupancyCell.y}][slot] = true;
+    }
+    assert(sixCells.size() == 2);
+    for (const auto& [cell, cellCount] : sixCells) {
+        assert(cellCount == 3);
+        assert(std::all_of(sixSubcells[cell].begin(), sixSubcells[cell].end(),
+            [](bool occupied) { return occupied; }));
+    }
+    const auto sixStableLayout = [&sixFormation]() {
+        std::vector<std::tuple<GridCoord, simulation::InfantrySubcell, WorldCoord>> layout;
+        for (const auto& entity : sixFormation.entities()) {
+            layout.emplace_back(entity.occupancyCell, entity.occupancySubcell, entity.position);
+            assert(entity.order.kind == CommandKind::None);
+        }
+        return layout;
+    }();
+    for (int step = 0; step < 300; ++step) {
+        sixFormation.update(1.0F / 60.0F);
+    }
+    for (std::size_t index = 0; index < sixFormation.entities().size(); ++index) {
+        const auto& entity = sixFormation.entities()[index];
+        const auto& stable = sixStableLayout[index];
+        assert(entity.occupancyCell == std::get<0>(stable));
+        assert(entity.occupancySubcell == std::get<1>(stable));
+        assert(std::abs(entity.position.x - std::get<2>(stable).x) < 0.001F);
+        assert(std::abs(entity.position.y - std::get<2>(stable).y) < 0.001F);
+        assert(entity.order.kind == CommandKind::None);
+    }
+    // A second command to the same cell must reallocate valid slots rather than
+    // seeing stale reservations left behind by the first arrival.
+    sixFormation.issueMove({8, 8});
+    const auto secondSixSignature = reservationSignature(sixFormation);
+    assert(std::all_of(secondSixSignature.begin(), secondSixSignature.end(),
+        [](const auto& reservation) { return reservation.second != simulation::InfantrySubcell::None; }));
+    auto [nineFormation, nineSignature] = formationSignature(9);
+    static_cast<void>(nineSignature);
+    for (int step = 0; step < 600; ++step) {
+        nineFormation.update(1.0F / 60.0F);
+    }
+    std::map<std::pair<int, int>, int> nineCells;
+    std::map<std::pair<int, int>, std::array<bool, 3>> nineSubcells;
+    for (const auto& entity : nineFormation.entities()) {
+        nineCells[{entity.occupancyCell.x, entity.occupancyCell.y}]++;
+        const auto slot = static_cast<std::size_t>(entity.occupancySubcell);
+        assert(slot < 3U);
+        nineSubcells[{entity.occupancyCell.x, entity.occupancyCell.y}][slot] = true;
+    }
+    assert(nineCells.size() == 3);
+    for (const auto& [cell, cellCount] : nineCells) {
+        assert(cellCount == 3);
+        assert(std::all_of(nineSubcells[cell].begin(), nineSubcells[cell].end(),
+            [](bool occupied) { return occupied; }));
+    }
+    const auto nineStableLayout = [&nineFormation]() {
+        std::vector<std::tuple<GridCoord, simulation::InfantrySubcell, WorldCoord>> layout;
+        for (const auto& entity : nineFormation.entities()) {
+            layout.emplace_back(entity.occupancyCell, entity.occupancySubcell, entity.position);
+            assert(entity.order.kind == CommandKind::None);
+        }
+        return layout;
+    }();
+    for (int step = 0; step < 300; ++step) {
+        nineFormation.update(1.0F / 60.0F);
+    }
+    for (std::size_t index = 0; index < nineFormation.entities().size(); ++index) {
+        const auto& entity = nineFormation.entities()[index];
+        const auto& stable = nineStableLayout[index];
+        assert(entity.occupancyCell == std::get<0>(stable));
+        assert(entity.occupancySubcell == std::get<1>(stable));
+        assert(std::abs(entity.position.x - std::get<2>(stable).x) < 0.001F);
+        assert(std::abs(entity.position.y - std::get<2>(stable).y) < 0.001F);
+        assert(entity.order.kind == CommandKind::None);
+    }
+    for (std::size_t first = 0; first < nineFormation.entities().size(); ++first) {
+        for (std::size_t second = first + 1; second < nineFormation.entities().size(); ++second) {
+            assert(distance(nineFormation.entities()[first].position,
+                nineFormation.entities()[second].position) > 0.01F);
+        }
+    }
+
     simulation::Simulation overrideSimulation(animationDefinition);
     const std::uint32_t overrideRed = overrideSimulation.spawn(definition, Owner::Red, {0, 0});
     const std::uint32_t overrideBlue = overrideSimulation.spawn(definition, Owner::Blue, {3, 0});
@@ -287,43 +510,64 @@ Inviso=yes
     overrideSimulation.update(0.25F);
     assert(overrideSimulation.find(overrideRed)->position.x > overrideStartX);
 
-    const auto minimapWorldExtents = [](const IsometricCamera& camera) {
+    const Rect minimapField{14.0F, 38.0F, 292.0F, 168.0F};
+    const IsoMapProjection minimapProjection(64.0F, 64.0F, minimapField);
+    const ScreenCoord minimapCenter = minimapProjection.project({32.0F, 32.0F});
+    const ScreenCoord minimapTop = minimapProjection.project({0.0F, 0.0F});
+    const ScreenCoord minimapRight = minimapProjection.project({64.0F, 0.0F});
+    const ScreenCoord minimapBottom = minimapProjection.project({64.0F, 64.0F});
+    const ScreenCoord minimapLeft = minimapProjection.project({0.0F, 64.0F});
+    assert(std::abs(minimapCenter.x - (minimapField.x + minimapField.width * 0.5F)) < 0.001F);
+    assert(std::abs(minimapCenter.y - (minimapField.y + minimapField.height * 0.5F)) < 0.001F);
+    assert(std::abs(minimapTop.x - minimapCenter.x) < 0.001F);
+    assert(std::abs(minimapBottom.x - minimapCenter.x) < 0.001F);
+    assert(std::abs(minimapLeft.y - minimapCenter.y) < 0.001F);
+    assert(std::abs(minimapRight.y - minimapCenter.y) < 0.001F);
+    assert(minimapRight.x > minimapLeft.x && minimapBottom.y > minimapTop.y);
+    const WorldCoord minimapRoundTripSource{19.5F, 27.25F};
+    const WorldCoord minimapRoundTrip = minimapProjection.unproject(
+        minimapProjection.project(minimapRoundTripSource));
+    assert(std::abs(minimapRoundTrip.x - minimapRoundTripSource.x) < 0.001F);
+    assert(std::abs(minimapRoundTrip.y - minimapRoundTripSource.y) < 0.001F);
+
+    const auto minimapViewport = [&minimapProjection](const IsometricCamera& camera) {
         constexpr Rect viewport{100.0F, 50.0F, 1390.0F, 780.0F};
-        const ScreenCoord viewportCenter{
-            viewport.x + viewport.width * 0.5F, viewport.y + viewport.height * 0.5F};
-        const WorldCoord center = camera.toWorld(viewportCenter);
-        const WorldCoord corners[] = {
-            camera.toWorld({viewport.x, viewport.y}),
-            camera.toWorld({viewport.x + viewport.width, viewport.y}),
-            camera.toWorld({viewport.x, viewport.y + viewport.height}),
-            camera.toWorld({viewport.x + viewport.width, viewport.y + viewport.height}),
+        const std::array<ScreenCoord, 4> screenCorners = {
+            ScreenCoord{viewport.x, viewport.y},
+            ScreenCoord{viewport.x + viewport.width, viewport.y},
+            ScreenCoord{viewport.x + viewport.width, viewport.y + viewport.height},
+            ScreenCoord{viewport.x, viewport.y + viewport.height},
         };
-        float minX = corners[0].x - center.x;
-        float maxX = minX;
-        float minY = corners[0].y - center.y;
-        float maxY = minY;
-        for (const WorldCoord corner : corners) {
-            minX = std::min(minX, corner.x - center.x);
-            maxX = std::max(maxX, corner.x - center.x);
-            minY = std::min(minY, corner.y - center.y);
-            maxY = std::max(maxY, corner.y - center.y);
+        std::array<ScreenCoord, 4> corners{};
+        for (std::size_t index = 0; index < screenCorners.size(); ++index) {
+            corners[index] = minimapProjection.project(camera.toWorld(screenCorners[index]));
         }
-        return Rect{center.x + minX, center.y + minY, maxX - minX, maxY - minY};
+        return corners;
+    };
+    const auto polygonArea = [](const std::array<ScreenCoord, 4>& polygon) {
+        float area = 0.0F;
+        for (std::size_t index = 0; index < polygon.size(); ++index) {
+            const ScreenCoord first = polygon[index];
+            const ScreenCoord second = polygon[(index + 1U) % polygon.size()];
+            area += first.x * second.y - second.x * first.y;
+        }
+        return std::abs(area) * 0.5F;
     };
     IsometricCamera minimapCamera;
     minimapCamera.viewportCenter = {795.0F, 440.0F};
     minimapCamera.worldCenter = {32.0F, 32.0F};
-    const Rect minimapBeforePan = minimapWorldExtents(minimapCamera);
+    const auto minimapBeforePan = minimapViewport(minimapCamera);
+    const float minimapBeforePanArea = polygonArea(minimapBeforePan);
     minimapCamera.panScreen({160.0F, 90.0F});
-    const Rect minimapAfterPan = minimapWorldExtents(minimapCamera);
-    assert(std::abs(minimapAfterPan.width - minimapBeforePan.width) < 0.001F);
-    assert(std::abs(minimapAfterPan.height - minimapBeforePan.height) < 0.001F);
-    assert(std::abs(minimapAfterPan.x - minimapBeforePan.x) > 0.001F ||
-        std::abs(minimapAfterPan.y - minimapBeforePan.y) > 0.001F);
+    const auto minimapAfterPan = minimapViewport(minimapCamera);
+    assert(std::abs(polygonArea(minimapAfterPan) - minimapBeforePanArea) < 0.1F);
+    assert(std::abs(minimapAfterPan[0].x - minimapBeforePan[0].x) > 0.001F ||
+        std::abs(minimapAfterPan[0].y - minimapBeforePan[0].y) > 0.001F);
     minimapCamera.zoomAt({795.0F, 440.0F}, 1.3F);
-    const Rect minimapAfterZoom = minimapWorldExtents(minimapCamera);
-    assert(minimapAfterZoom.width < minimapAfterPan.width);
-    assert(minimapAfterZoom.height < minimapAfterPan.height);
+    const auto minimapAfterZoom = minimapViewport(minimapCamera);
+    assert(polygonArea(minimapAfterZoom) < polygonArea(minimapAfterPan));
+    const WorldCoord minimapDown = minimapCamera.toWorld({795.0F, 540.0F});
+    assert(minimapProjection.project(minimapDown).y > minimapProjection.project(minimapCamera.worldCenter).y);
 
     simulation.clearSelection();
     simulation.selectSingle({static_cast<int>(moved->position.x), static_cast<int>(moved->position.y)});
@@ -332,6 +576,68 @@ Inviso=yes
     simulation.update(1.0F);
     simulation.update(1.0F);
     assert(simulation.find(blue) == nullptr || simulation.find(blue)->health < initialHealth);
+
+    editor::TerrainMap editorMap(8, 8);
+    editorMap.fill("GRASS");
+    simulation::Simulation editorSimulation(animationDefinition, &veterancy);
+    editor::EditorToolController editorController(editorMap, terrainDatabase, rules, editorSimulation);
+    assert(editorController.loadBrushPresets(contentRoot / "INI/Editor.ini", error));
+    assert(editorController.brushPresets().size() == 7);
+    editorController.state().category = editor::EditorAssetCategory::Terrain;
+    editorController.state().tool = editor::EditorToolId::Pencil;
+    assert(editorController.apply({1, 1}).changed == false);
+    editorController.state().terrainAsset = "GRASS";
+    editorController.state().tool = editor::EditorToolId::Eraser;
+    assert(editorController.apply({1, 1}).changed);
+    assert(!editorMap.cell({1, 1}).exists);
+    editorController.state().tool = editor::EditorToolId::Pencil;
+    editorController.state().terrainAsset = "GRASS";
+    editorController.state().tool = editor::EditorToolId::Eraser;
+    assert(editorController.apply({2, 2}).changed);
+    editorController.state().tool = editor::EditorToolId::Pencil;
+    editorController.beginStroke();
+    assert(editorController.continueStroke({2, 2}).changed);
+    assert(!editorController.continueStroke({2, 2}).changed);
+    editorController.endStroke();
+    editorController.state().terrainAsset = "DIRT";
+    editorController.state().tool = editor::EditorToolId::FillBucket;
+    assert(editorController.apply({0, 0}).changed);
+    assert(editorMap.cell({0, 0}).terrainTypeId == "DIRT");
+    editorController.state().tool = editor::EditorToolId::Brush;
+    editorController.state().brushPreset = 1;
+    assert(editorController.previewCells({4, 4}).size() == 4);
+    editorController.state().category = editor::EditorAssetCategory::Unit;
+    editorController.state().unitAsset = "E2";
+    editorController.state().tool = editor::EditorToolId::Pencil;
+    editorController.state().owner = Owner::Blue;
+    const std::uint32_t placedOne = editorController.apply({4, 4}).changed ?
+        editorSimulation.entityAtCell({4, 4}) : 0;
+    assert(placedOne != 0 && editorSimulation.find(placedOne)->owner == Owner::Blue);
+    const std::uint32_t placedTwo = editorSimulation.spawn(rules.e2(), Owner::Blue, {4, 4});
+    assert(placedTwo != 0 && editorSimulation.find(placedTwo)->position.x !=
+        editorSimulation.find(placedOne)->position.x);
+    editorController.state().tool = editor::EditorToolId::Eraser;
+    assert(editorController.apply({4, 4}, placedOne).changed);
+    assert(editorSimulation.find(placedOne) == nullptr);
+
+    simulation::Entity statusEntity;
+    statusEntity.health = 25;
+    statusEntity.maxHealth = 125;
+    statusEntity.shields = {10, 5};
+    statusEntity.energy = 4;
+    statusEntity.maxEnergy = 10;
+    statusEntity.killCount = 2;
+    statusEntity.veterancyProfile = "Standard";
+    statusEntity.veterancyLevel = "Rookie";
+    gamedata::UnitDefinition statusDefinition = rules.e2();
+    statusDefinition.weapons = {statusDefinition.primary, statusDefinition.primary, statusDefinition.primary};
+    const client::hud::UnitStatusViewModel status = client::hud::UnitStatusViewModelBuilder::build(
+        statusEntity, statusDefinition, rules, veterancy, {});
+    assert(status.displayNameKey == "cons" && status.healthBand == client::hud::HealthBand::Critical);
+    assert(status.shields.size() == 2 && status.energy == 4 && status.kills == 2);
+    assert(status.weapons.size() == 3 && status.tags.size() == 3);
+    assert(client::hud::UnitStatusViewModelBuilder::tooltip(status.weapons.front()).find(L"伤害：") !=
+        std::wstring::npos);
 
     gamedata::UnitDefinition alliedDefinition = definition;
     alliedDefinition.id = "S1";
@@ -377,6 +683,22 @@ Inviso=yes
     assert(holdSimulation.find(holdRed)->position.x == 0.0F);
     assert(holdSimulation.find(holdBlue)->health < holdBlueHealth);
 
+    gamedata::UnitDefinition experienceDefinition = behaviorDefinition;
+    experienceDefinition.strength = 40;
+    experienceDefinition.primary.damage = 40;
+    experienceDefinition.experienceValue = 25;
+    simulation::Simulation experienceSimulation(animationDefinition, &veterancy);
+    const std::uint32_t experienceAttacker = experienceSimulation.spawn(
+        experienceDefinition, Owner::Red, {0, 0});
+    const std::uint32_t experienceTarget = experienceSimulation.spawn(
+        experienceDefinition, Owner::Blue, {3, 0});
+    experienceSimulation.selectEntity(experienceAttacker);
+    experienceSimulation.issueAttack(experienceTarget);
+    experienceSimulation.update(1.0F / 30.0F);
+    assert(experienceSimulation.find(experienceAttacker)->killCount == 1);
+    assert(experienceSimulation.find(experienceAttacker)->experience == 25);
+    assert(experienceSimulation.find(experienceTarget) != nullptr);
+
     gamedata::UnitDefinition returnFireDefinition = behaviorDefinition;
     returnFireDefinition.autoAcquire = false;
     simulation::Simulation returnFireSimulation(animationDefinition);
@@ -389,6 +711,23 @@ Inviso=yes
     returnFireSimulation.update(1.0F);
     assert(returnFireSimulation.find(returnRed)->recentAttacker == returnBlue);
     assert(returnFireSimulation.find(returnBlue)->health < returnBlueHealth);
+
+    simulation::Simulation forceAttackSimulation(animationDefinition);
+    const std::uint32_t forceAttacker = forceAttackSimulation.spawn(
+        behaviorDefinition, Owner::Red, {0, 0});
+    const std::uint32_t forceFriendlyTarget = forceAttackSimulation.spawn(
+        behaviorDefinition, Owner::Red, {2, 0});
+    forceAttackSimulation.selectEntity(forceAttacker);
+    const int friendlyHealth = forceAttackSimulation.find(forceFriendlyTarget)->health;
+    forceAttackSimulation.issueForceAttack({2, 0}, forceFriendlyTarget);
+    forceAttackSimulation.update(1.0F / 30.0F);
+    assert(forceAttackSimulation.find(forceFriendlyTarget)->health < friendlyHealth);
+
+    forceAttackSimulation.selectEntity(forceAttacker);
+    const std::uint32_t attackEventBefore = forceAttackSimulation.find(forceAttacker)->attackEvent;
+    forceAttackSimulation.issueForceAttack({1, 0});
+    forceAttackSimulation.update(1.0F);
+    assert(forceAttackSimulation.find(forceAttacker)->attackEvent > attackEventBefore);
 
     std::cout << "ra2yr core tests passed\n";
     return 0;

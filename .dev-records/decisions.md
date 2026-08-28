@@ -142,6 +142,17 @@ Sprite constant buffer 从单色扩展为 16 个 RGBA 项；未来更多 HouseCo
 - 保持本轮范围在现有 Editor Sandbox 的选择标识、Simulation occupancy、UI.ini 主题布局和 E2 VoiceSet；不新增完整 Editor 绘图工具、复杂 Unit Info Panel、第二单位、生产、AI 或 Trigger。
 - 运行截图作为可复核证据保存，但不把自动截图、静态检查或 CTest 描述为人工视觉/交互验收通过。
 
+## 2026-08-27 - 编队 reservation 生命周期
+
+### 决策
+
+- 将 group destination reservation 与当前 occupancy 保持两张独立 map；group command 先按 EntityId 计算全部 slot，再批量写 reservation，抵达时显式转移为 occupancy。
+- reservation 的释放必须是生命周期操作，而不是只清 Entity 字段；因此 commit、取消命令和后续编队命令都经过同一 `releaseReservation` 路径。
+
+### 原因
+
+- 仅清除 Entity 的 reservation 字段会留下不可见的旧槽位，破坏连续命令和确定性分配；统一释放路径能让逻辑状态与 F3 诊断保持一致。
+
 ## 2026-08-27 - Formal panel skin assets
 
 ### 决策
@@ -156,3 +167,35 @@ Sprite constant buffer 从单色扩展为 16 个 RGBA 项；未来更多 HouseCo
 ### 代价
 
 - 主题图片缺失时当前正式运行会在资源加载阶段明确失败；这避免静默退回线框外壳，并要求每个发布主题完整提供声明的面板素材。
+
+## 2026-08-27 - Editor tools are simulation-facing modules
+
+### 决策
+- Editor 输入通过 `EditorToolController` 修改 `TerrainMap` 或调用 Simulation；main.cpp 只负责窗口事件、坐标转换和绘制协调。
+- Pointer 是唯一不修改世界的工具；Building/Resource 只保留 disabled 类别框架。
+
+### 原因
+- 地形、单位放置、删除和取色需要可测试的领域行为，不能继续把编辑规则散落在 SDL 事件处理器中。
+- Terrain cell 的 `Exists` 与 Simulation occupancy 必须是真实数据状态，不能用 renderer 偏移或视觉占位伪造。
+
+## 2026-08-27 - Unit Status uses a read-only ViewModel
+
+### 决策
+- HUD 只消费 `UnitStatusViewModel`，由 Rules、Simulation、Veterancy 和 PlayerUpgradeState 组合生成。
+- E2 没有 Rules 定义的护盾/能量时不显示伪造值；多武器使用定义数量驱动的 card 列表。
+
+### 原因
+- 保持正式玩家 UI 与调试字段分离，并让后续单位/Mod 可通过数据定义扩展卡片，不把 UI 绑定到 E2 字符串。
+
+## 2026-08-27 - Minimap and Unit Status closeout decisions
+
+### 决策
+
+- Minimap 不再从屏幕 viewport 计算轴对齐 world Rect；使用共享 `IsoMapProjection` 绘制菱形 cell 与相机四角 polygon。
+- Unit Status 的 model/info 是同一个 `hud.unitstatus` 正式 skin parent；动态文字、sprite、card badge 仅作为内容叠加，旧 `hud.model`/`hud.info` image entry 不再参与正式渲染。
+- Sandbox 的可交互控件使用专用 editor skin image ID，按钮和 tab 的绘制继续与既有 parent-relative hitbox 共用 rect。
+
+### 原因
+
+- 共享投影保证平移只改变 viewport polygon 的位置、缩放才改变其面积，并让 Terrain 与 Unit 在同一 minimap 坐标系中对齐。
+- 统一 Unit Status 外框和专用 editor 控件资源让 MOD 可以替换对应主题图片而不依赖旧 DTA 外壳。

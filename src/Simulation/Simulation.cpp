@@ -2,14 +2,16 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <utility>
 
 namespace ra2yr::simulation {
 namespace {
 
 constexpr float kPi = 3.14159265358979323846F;
-constexpr float kInfantrySubcellOffset = 0.30F;
+// Three infantry positions must remain visually distinct inside one ground
+// cell. This is the simulation's occupancy geometry, not a renderer-only
+// separation offset.
+constexpr float kInfantrySubcellOffset = 0.19F;
 
 WorldCoord toWorld(GridCoord coord) {
     return {static_cast<float>(coord.x), static_cast<float>(coord.y)};
@@ -70,8 +72,23 @@ bool pointInConvexQuad(WorldCoord point, const std::array<WorldCoord, 4>& corner
 
 } // namespace
 
-Simulation::Simulation(const gamedata::ArtDefinition& animationDefinition)
-    : animationDefinition_(animationDefinition) {}
+const char* infantrySubcellName(InfantrySubcell subcell) {
+    switch (subcell) {
+    case InfantrySubcell::TopCenter:
+        return "TopCenter";
+    case InfantrySubcell::BottomLeft:
+        return "BottomLeft";
+    case InfantrySubcell::BottomRight:
+        return "BottomRight";
+    case InfantrySubcell::None:
+        return "None";
+    }
+    return "None";
+}
+
+Simulation::Simulation(const gamedata::ArtDefinition& animationDefinition,
+    const gamedata::VeterancyDatabase* veterancyDatabase)
+    : animationDefinition_(animationDefinition), veterancyDatabase_(veterancyDatabase) {}
 
 Direction8 Simulation::directionFromDelta(float dx, float dy) {
     if (std::abs(dx) < 0.001F && std::abs(dy) < 0.001F) {
@@ -102,15 +119,12 @@ std::uint32_t Simulation::spawn(const gamedata::UnitDefinition& definition, Owne
     entity.occupancyCell = position;
     if (isInfantry(entity)) {
         const auto location = findAvailableSubcell(position, entity.id);
-        if (location.has_value()) {
-            entity.occupancyCell = location->cell;
-            entity.occupancySubcell = location->subcell;
-            entity.position = subcellPosition(entity.occupancyCell, entity.occupancySubcell);
-        } else {
-            // Keep a valid world position if the bounded search is exhausted;
-            // an unassigned entity must never be inserted with a None slot.
-            entity.position = toWorld(position);
+        if (!location.has_value()) {
+            return 0;
         }
+        entity.occupancyCell = location->cell;
+        entity.occupancySubcell = location->subcell;
+        entity.position = subcellPosition(entity.occupancyCell, entity.occupancySubcell);
     } else {
         entity.position = toWorld(position);
     }
@@ -122,6 +136,11 @@ std::uint32_t Simulation::spawn(const gamedata::UnitDefinition& definition, Owne
     entity.weaponDamage = std::max(1, definition.primary.damage);
     entity.autoAcquire = definition.autoAcquire;
     entity.returnFire = definition.returnFire;
+    entity.experienceValue = definition.experienceValue;
+    entity.veterancyProfile = definition.veterancyProfile;
+    entity.veterancyLevel = definition.initialVeterancy;
+    entity.energy = definition.initialEnergy;
+    entity.maxEnergy = definition.maxEnergy;
     if (isInfantry(entity) && entity.occupancySubcell != InfantrySubcell::None) {
         infantryOccupancy_[cellKey(entity.occupancyCell)][static_cast<std::size_t>(entity.occupancySubcell)] = entity.id;
     }
@@ -163,7 +182,7 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
     const CommandKind orderKind = entity.order.kind;
     Entity* target = nullptr;
     bool mayChaseTarget = false;
-    if (orderKind == CommandKind::Attack) {
+    if (orderKind == CommandKind::Attack || orderKind == CommandKind::ForceAttack) {
         target = find(entity.order.target);
         mayChaseTarget = true;
     } else if (orderKind == CommandKind::AttackMove) {
@@ -212,6 +231,7 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
                 entity.weaponCooldown = 25.0F / 30.0F;
                 ++entity.attackEvent;
                 if (!isAlive(*target)) {
+                    awardExperience(entity, *target);
                     target->order = {};
                     target->patrolPoint.reset();
                     target->selected = false;
@@ -220,9 +240,13 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
         }
     }
 
+    // For infantry, the reservation is the assigned destination. The command
+    // cell is only the player's request and must not become a second target
+    // after the assigned subcell is committed.
     const WorldCoord destination = movementDestination(entity);
-    const bool hasDestination = orderKind == CommandKind::Move || orderKind == CommandKind::Patrol ||
-        orderKind == CommandKind::AttackMove;
+    const bool destinationAssigned = !isInfantry(entity) ||
+        entity.reservedSubcell != InfantrySubcell::None || entity.order.destination == entity.occupancyCell;
+    const bool hasDestination = movementOrder(orderKind) && destinationAssigned;
     if (!attacking && !moving && (target == nullptr || !isAlive(*target)) && hasDestination &&
         distance(entity.position, destination) > 0.12F) {
         const float dx = destination.x - entity.position.x;
@@ -240,7 +264,44 @@ void Simulation::updateEntity(Entity& entity, float seconds) {
         if (orderKind == CommandKind::Patrol && entity.patrolPoint.has_value()) {
             std::swap(entity.order.destination, *entity.patrolPoint);
             static_cast<void>(reserveDestination(entity, entity.order.destination));
+        } else {
+            // Move and AttackMove finish only after their assigned target has
+            // been committed. Clearing the order prevents reconvergence on
+            // the original click cell on the next simulation tick.
+            entity.order = {};
+            entity.patrolPoint.reset();
         }
+    }
+
+    // Force attack also accepts a ground point.  With no entity target the
+    // unit advances to the requested point and emits the same attack event,
+    // while an entity target is allowed regardless of owner.
+    if (orderKind == CommandKind::ForceAttack && target == nullptr) {
+        const WorldCoord attackPoint = toWorld(entity.order.destination);
+        const float targetDistance = distance(entity.position, attackPoint);
+        if (targetDistance > entity.weaponRange) {
+            const float dx = attackPoint.x - entity.position.x;
+            const float dy = attackPoint.y - entity.position.y;
+            const float length = std::sqrt(dx * dx + dy * dy);
+            if (length > 0.001F) {
+                const float step = static_cast<float>(entity.speed) * seconds * 0.55F;
+                setFacing(entity, dx, dy);
+                entity.position.x += dx / length * std::min(step, length);
+                entity.position.y += dy / length * std::min(step, length);
+                moving = true;
+            }
+        } else {
+            attacking = true;
+            setFacing(entity, attackPoint.x - entity.position.x, attackPoint.y - entity.position.y);
+            if (entity.weaponCooldown <= 0.0F) {
+                entity.weaponCooldown = 25.0F / 30.0F;
+                ++entity.attackEvent;
+            }
+        }
+    }
+
+    if (moving && isInfantry(entity)) {
+        applyInfantrySeparation(entity, seconds);
     }
 
     if (attacking) {
@@ -363,7 +424,85 @@ void Simulation::applyToSelected(const Command& command, bool clearRecentAttacke
 }
 
 void Simulation::issueMove(GridCoord destination) {
-    applyToSelected({CommandKind::Move, destination, 0}, true);
+    std::vector<std::uint32_t> infantryIds;
+    for (const Entity& entity : entities_) {
+        if (entity.selected && isAlive(entity) && isInfantry(entity)) {
+            infantryIds.push_back(entity.id);
+        }
+    }
+    std::sort(infantryIds.begin(), infantryIds.end());
+
+    // Remove the selected formation from occupancy before choosing target slots.
+    // This lets a formation move back into its current cells without blocking itself.
+    for (const std::uint32_t id : infantryIds) {
+        Entity* entity = find(id);
+        if (entity != nullptr) {
+            releaseReservation(*entity);
+            releaseOccupancy(*entity);
+        }
+    }
+
+    const auto slotAvailable = [this](GridCoord cell, int slot) {
+        const auto occupied = infantryOccupancy_.find(cellKey(cell));
+        if (occupied != infantryOccupancy_.end() && occupied->second[static_cast<std::size_t>(slot)] != 0) {
+            return false;
+        }
+        const auto reserved = infantryReservations_.find(cellKey(cell));
+        return reserved == infantryReservations_.end() ||
+            reserved->second[static_cast<std::size_t>(slot)] == 0;
+    };
+    std::vector<SubcellLocation> availableSlots;
+    for (int radius = 0; radius <= 32 && availableSlots.size() < infantryIds.size(); ++radius) {
+        std::vector<GridCoord> cells;
+        for (int y = destination.y - radius; y <= destination.y + radius; ++y) {
+            for (int x = destination.x - radius; x <= destination.x + radius; ++x) {
+                if (std::max(std::abs(x - destination.x), std::abs(y - destination.y)) != radius) {
+                    continue;
+                }
+                cells.push_back({x, y});
+            }
+        }
+        std::shuffle(cells.begin(), cells.end(), random_);
+        for (const GridCoord cell : cells) {
+            std::array<int, 3> slots{0, 1, 2};
+            std::shuffle(slots.begin(), slots.end(), random_);
+            // Keep each cell together as a three-slot formation, but randomize
+            // which adjacent cell receives overflow and which subcell is used.
+            for (const int slot : slots) {
+                if (slotAvailable(cell, slot)) {
+                    availableSlots.push_back({cell, static_cast<InfantrySubcell>(slot)});
+                }
+            }
+        }
+    }
+
+    for (std::size_t index = 0; index < infantryIds.size(); ++index) {
+        Entity* entity = find(infantryIds[index]);
+        if (entity == nullptr) {
+            continue;
+        }
+        entity->order = {CommandKind::Move, destination, 0};
+        entity->recentAttacker = 0;
+        entity->patrolPoint.reset();
+        if (index >= availableSlots.size()) {
+            continue;
+        }
+        const SubcellLocation& location = availableSlots[index];
+        entity->reservedCell = location.cell;
+        entity->reservedSubcell = location.subcell;
+        infantryReservations_[cellKey(location.cell)][static_cast<std::size_t>(location.subcell)] = entity->id;
+    }
+
+    // Non-infantry units keep the same command semantics, but do not participate
+    // in the three-slot infantry formation allocator.
+    for (Entity& entity : entities_) {
+        if (entity.selected && isAlive(entity) && !isInfantry(entity)) {
+            releaseReservation(entity);
+            entity.order = {CommandKind::Move, destination, 0};
+            entity.recentAttacker = 0;
+            entity.patrolPoint.reset();
+        }
+    }
 }
 
 void Simulation::issueStop() {
@@ -394,6 +533,23 @@ void Simulation::issueAttack(std::uint32_t target) {
     applyToSelected({CommandKind::Attack, {}, target}, true);
 }
 
+void Simulation::issueForceAttack(GridCoord destination, std::uint32_t target) {
+    applyToSelected({CommandKind::ForceAttack, destination, target}, true);
+}
+
+bool Simulation::eraseEntity(std::uint32_t id) {
+    const auto it = std::find_if(entities_.begin(), entities_.end(), [id](const Entity& entity) {
+        return entity.id == id;
+    });
+    if (it == entities_.end()) {
+        return false;
+    }
+    releaseReservation(*it);
+    releaseOccupancy(*it);
+    entities_.erase(it);
+    return true;
+}
+
 const Entity* Simulation::find(std::uint32_t id) const {
     const auto it = std::find_if(entities_.begin(), entities_.end(), [id](const Entity& entity) {
         return entity.id == id;
@@ -406,6 +562,27 @@ Entity* Simulation::find(std::uint32_t id) {
         return entity.id == id;
     });
     return it == entities_.end() ? nullptr : &*it;
+}
+
+std::uint32_t Simulation::entityAtCell(GridCoord cell) const {
+    for (const Entity& entity : entities_) {
+        if (isAlive(entity) && entity.occupancyCell == cell) {
+            return entity.id;
+        }
+    }
+    return 0;
+}
+
+void Simulation::awardExperience(Entity& attacker, const Entity& target) {
+    ++attacker.killCount;
+    attacker.experience += std::max(0, target.experienceValue);
+    if (veterancyDatabase_ != nullptr) {
+        const gamedata::VeterancyLevelDefinition* current =
+            veterancyDatabase_->level(attacker.veterancyProfile, attacker.experience);
+        if (current != nullptr) {
+            attacker.veterancyLevel = current->id;
+        }
+    }
 }
 
 Entity* Simulation::nearestEnemy(const Entity& source, float maxDistance) {
@@ -424,6 +601,31 @@ Entity* Simulation::nearestEnemy(const Entity& source, float maxDistance) {
     return result;
 }
 
+void Simulation::applyInfantrySeparation(Entity& entity, float seconds) {
+    constexpr float kPersonalSpace = 0.42F;
+    const WorldCoord reservedTarget = movementDestination(entity);
+    const bool closeToReservation = entity.reservedSubcell != InfantrySubcell::None &&
+        distance(entity.position, reservedTarget) < 0.75F;
+    for (const Entity& other : entities_) {
+        if (other.id == entity.id || !isAlive(other) || !isInfantry(other)) {
+            continue;
+        }
+        const float dx = entity.position.x - other.position.x;
+        const float dy = entity.position.y - other.position.y;
+        const float currentDistance = std::sqrt(dx * dx + dy * dy);
+        if (currentDistance >= kPersonalSpace) {
+            continue;
+        }
+        const float directionX = currentDistance > 0.001F ? dx / currentDistance :
+            (entity.id < other.id ? -1.0F : 1.0F);
+        const float directionY = currentDistance > 0.001F ? dy / currentDistance : 0.0F;
+        const float strength = (kPersonalSpace - currentDistance) / kPersonalSpace *
+            seconds * (closeToReservation ? 0.35F : 1.25F);
+        entity.position.x += directionX * strength;
+        entity.position.y += directionY * strength;
+    }
+}
+
 bool Simulation::isInfantry(const Entity& entity) {
     return entity.occupancyProfile == "Infantry";
 }
@@ -435,37 +637,36 @@ WorldCoord Simulation::subcellPosition(GridCoord cell, InfantrySubcell subcell) 
 }
 
 std::optional<Simulation::SubcellLocation> Simulation::findAvailableSubcell(GridCoord requested,
-    std::uint32_t entityId) const {
-    float bestDistance = std::numeric_limits<float>::max();
-    std::optional<SubcellLocation> best;
-    const WorldCoord requestedCenter = toWorld(requested);
+    std::uint32_t entityId) {
     for (int radius = 0; radius <= 8; ++radius) {
+        std::vector<GridCoord> cells;
         for (int y = requested.y - radius; y <= requested.y + radius; ++y) {
             for (int x = requested.x - radius; x <= requested.x + radius; ++x) {
                 if (std::max(std::abs(x - requested.x), std::abs(y - requested.y)) != radius) {
                     continue;
                 }
-                const auto it = infantryOccupancy_.find(cellKey({x, y}));
-                for (int slot = 0; slot < 3; ++slot) {
-                    const std::uint32_t occupant = it == infantryOccupancy_.end() ? 0 :
-                        it->second[static_cast<std::size_t>(slot)];
-                    if (occupant != 0 && occupant != entityId) {
-                        continue;
-                    }
-                    const InfantrySubcell candidate = static_cast<InfantrySubcell>(slot);
-                    const float candidateDistance = distance(subcellPosition({x, y}, candidate), requestedCenter);
-                    if (candidateDistance < bestDistance) {
-                        bestDistance = candidateDistance;
-                        best = SubcellLocation{{x, y}, candidate};
-                    }
-                }
+                cells.push_back({x, y});
             }
         }
-        if (best.has_value() && radius > 0) {
-            break;
+        std::shuffle(cells.begin(), cells.end(), random_);
+        for (const GridCoord cell : cells) {
+            const auto it = infantryOccupancy_.find(cellKey(cell));
+            const auto reservation = infantryReservations_.find(cellKey(cell));
+            std::array<int, 3> slots{0, 1, 2};
+            std::shuffle(slots.begin(), slots.end(), random_);
+            for (const int slot : slots) {
+                const std::uint32_t occupant = it == infantryOccupancy_.end() ? 0 :
+                    it->second[static_cast<std::size_t>(slot)];
+                const std::uint32_t reserved = reservation == infantryReservations_.end() ? 0 :
+                    reservation->second[static_cast<std::size_t>(slot)];
+                if ((occupant != 0 && occupant != entityId) || (reserved != 0 && reserved != entityId)) {
+                    continue;
+                }
+                return SubcellLocation{cell, static_cast<InfantrySubcell>(slot)};
+            }
         }
     }
-    return best;
+    return std::nullopt;
 }
 
 void Simulation::releaseOccupancy(Entity& entity) {
@@ -487,25 +688,28 @@ void Simulation::releaseOccupancy(Entity& entity) {
 }
 
 void Simulation::releaseReservation(Entity& entity) {
-    if (!isInfantry(entity) || entity.reservedSubcell == InfantrySubcell::None) {
+    if (!isInfantry(entity)) {
         return;
     }
-    const auto it = infantryOccupancy_.find(cellKey(entity.reservedCell));
-    if (it != infantryOccupancy_.end()) {
-        auto& slots = it->second;
-        const std::size_t slot = static_cast<std::size_t>(entity.reservedSubcell);
-        if (slot < slots.size() && slots[slot] == entity.id) {
-            slots[slot] = 0;
-        }
-        if (std::all_of(slots.begin(), slots.end(), [](std::uint32_t occupant) { return occupant == 0; })) {
-            infantryOccupancy_.erase(it);
+    if (entity.reservedSubcell != InfantrySubcell::None) {
+        const auto it = infantryReservations_.find(cellKey(entity.reservedCell));
+        if (it != infantryReservations_.end()) {
+            auto& slots = it->second;
+            const std::size_t slot = static_cast<std::size_t>(entity.reservedSubcell);
+            if (slot < slots.size() && slots[slot] == entity.id) {
+                slots[slot] = 0;
+            }
+            if (std::all_of(slots.begin(), slots.end(), [](std::uint32_t occupant) { return occupant == 0; })) {
+                infantryReservations_.erase(it);
+            }
         }
     }
     entity.reservedSubcell = InfantrySubcell::None;
+    entity.reservedCell = {};
 }
 
 bool Simulation::reserveDestination(Entity& entity, GridCoord destination) {
-    if (!isInfantry(entity) || destination == entity.occupancyCell) {
+    if (!isInfantry(entity)) {
         return true;
     }
     const auto location = findAvailableSubcell(destination, entity.id);
@@ -514,7 +718,7 @@ bool Simulation::reserveDestination(Entity& entity, GridCoord destination) {
     }
     entity.reservedCell = location->cell;
     entity.reservedSubcell = location->subcell;
-    infantryOccupancy_[cellKey(location->cell)][static_cast<std::size_t>(location->subcell)] = entity.id;
+    infantryReservations_[cellKey(location->cell)][static_cast<std::size_t>(location->subcell)] = entity.id;
     return true;
 }
 
@@ -522,11 +726,14 @@ void Simulation::commitReservation(Entity& entity) {
     if (!isInfantry(entity) || entity.reservedSubcell == InfantrySubcell::None) {
         return;
     }
+    const GridCoord destinationCell = entity.reservedCell;
+    const InfantrySubcell destinationSubcell = entity.reservedSubcell;
+    releaseReservation(entity);
     releaseOccupancy(entity);
-    entity.occupancyCell = entity.reservedCell;
-    entity.occupancySubcell = entity.reservedSubcell;
+    entity.occupancyCell = destinationCell;
+    entity.occupancySubcell = destinationSubcell;
     entity.position = subcellPosition(entity.occupancyCell, entity.occupancySubcell);
-    entity.reservedSubcell = InfantrySubcell::None;
+    infantryOccupancy_[cellKey(entity.occupancyCell)][static_cast<std::size_t>(entity.occupancySubcell)] = entity.id;
 }
 
 WorldCoord Simulation::movementDestination(const Entity& entity) const {

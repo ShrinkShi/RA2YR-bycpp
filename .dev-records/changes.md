@@ -124,3 +124,94 @@
 - `tools/dev/build.ps1`：MSVC x64 compile/link PASS。
 - `tools/dev/test.ps1`：CTest `1/1` PASS。
 - 实际启动 `build/windows-vcpkg/ra2yr_client.exe`，进程保持响应；构建目录确认九个主题 PNG 已复制，运行日志确认 SDL/D3D11、Rules/Art、CONS.SHP、unittem.pal 和 VoiceSet 加载。
+
+## 2026-08-27 - PR #2 Editor Tools and Unit Status
+
+### 变更范围
+- 只增加 Editor Tool System 和 Unit Status ViewModel，不新增第二单位、生产、经济、AI、Trigger、多人或真实 MAP/TMP。
+
+### 具体改动
+- 新增数据驱动 Terrain Registry/Map 与六工具编辑控制器；Void、四连通 Fill、笔刷预览、单位真实 spawn/erase 和 Infantry occupancy 均通过正式模块实现。
+- Rules 支持 infantry registry、UIName/SecondaryUIName、多个武器、ArmorDefinition、ExperienceValue、VeterancyProfile、可选 shields/energy 和标签本地化。
+- Simulation 保存击杀/经验/军阶并在正式击杀时更新；HUD 通过 UnitStatusViewModel 读取生命、军阶、护甲、多武器和标签。
+- UI.ini 增加工具窗口 rect、工具图标和 Status 卡片布局；新增 `INI/Terrain.ini`、`INI/Editor.ini` 与项目自有图标资源。
+
+### 验证情况
+- MSVC x64 configure、compile/link 和 CTest 已完成通过；EXE 启动证据在本轮最终验证中补充，自动测试不等同于人工验收。
+
+### 最终验证补充
+- 最新改动重新完成官方 setup/configure、MSVC compile/link 和 CTest `1/1 PASS`；UnitStatus 阈值来自 `UI.ini`，Editor brush presets 来自 `Editor.ini`，武器卡贴图按 Rules weapon registry 动态加载。
+- 实际启动最新 `ra2yr_client.exe` 并采集主菜单、Editor Sandbox、F3 Debug Overlay 窗口证据；截图不替代人工视觉/交互验收。
+
+## 2026-08-27 - 编队 reservation 与 Sandbox card geometry 收口
+
+### 变更
+
+- `Simulation::commitReservation` 现在先释放 reservation map，再写入当前 occupancy；`releaseReservation` 同步清空 cell/subcell 字段，避免旧目标槽位永久阻塞后续命令。
+- Sandbox palette 增加 `sandbox.asset.icon.*` 与 `sandbox.asset.label.*` 相对 Rect；素材卡片绘制使用同一份配置布局，图标与标签不再依赖 C++ inset 常量。
+- 编队测试覆盖 6/9 infantry 的 3-subcell 分配、每格三种 subcell、确定性 assignment 和抵达后二次复用。
+
+### 验证
+
+- `tools/dev/setup.ps1` configure/generate PASS；MSVC x64 build/link PASS；CTest `1/1 PASS`。
+- EXE 实际启动且保持响应，日志确认 SDL/D3D11、Rules/Art、CONS.SHP、unittem.pal 和 E2 VoiceSet 样本加载。
+
+## 2026-08-27 - 编队完成、Sandbox skin、Unit Status 与 Minimap
+
+### 变更
+
+- Move/AttackMove 在 reservation commit 后清除一次性 order；Patrol 仍在两条腿之间换向并重新 reservation，步兵无已分配 subcell 时不再回退到 requested cell。
+- 增加 6/9 infantry 到达后持续 5 秒的布局稳定性回归测试。
+- Sandbox 使用专用 `editor/{button,tab,asset,dropdown}` 主题资源，紧凑布局只绘制 Terrain/Unit registry 中存在的 asset card；popup 展开高度跟随同一份 parent-relative rect。
+- Unit Status 移除独立 model/info 正式框，使用 `hud.unitstatus.background`，状态卡使用独立主题资源并由配置 inset 放置图标和 upgrade badge。
+- `IsoMapProjection` 复用 `IsoProjection` 的方向基准，Minimap 的地形、单位和相机四角视口都经过同一等距映射。
+
+### 验证
+
+- CMake preset configure/generate PASS；MSVC x64 compile/link PASS；CTest `1/1 PASS`。
+- 实际 `ra2yr_client.exe` 启动保持响应，日志确认 SDL/D3D11、Rules/Art、CONS.SHP、unittem.pal 和 E2 VoiceSet 加载；运行截图位于被忽略的 `artifacts/round5-validation/`。
+
+## 2026-08-27 - 编辑器测试地块与异形 HUD 收口
+
+### 变更范围
+- 只收口 Editor Sandbox 的测试可视性和 HUD 布局；不新增第二单位、生产逻辑、AI、Trigger 或其他 Gameplay。
+
+### 具体改动
+- 将 Sandbox 地块改为高对比水泥色等距格，并使用黑色世界边线突出单格边界；提高 tile 与 Infantry subcell 的可读比例。
+- 将底部 HUD 调整为小地图、单位状态、2:3 头像/动画区和更高的 3x5 方形 Command Card；护甲/武器卡固定为方形并保留右下角升级徽记。
+- 战略栏支持向左收起；生产分类使用从 RA2/YR SHP 与 `unittem.pal` 读取的图标，产品栏保持两列，未接入真实 Producer 时显示禁用空槽。
+- Sandbox 工具控件和窗口标题改为中文；正式 Command Card 不再显示“命令面板”标题，绘制与输入继续共享 `UI.ini` rect。
+- 将本轮运行截图目录加入 Git 忽略；保留本地截图作为人工复核证据，不把截图、参考资料或 corpus 语料提交进分支。
+
+### 验证情况
+- `tools/dev/setup.ps1`、`tools/dev/build.ps1` 和 `tools/dev/test.ps1` 均已重新执行；MSVC x64 configure/build/link PASS，CTest `1/1 PASS`。
+- 实际运行 `ra2yr_client.exe` 并采集主菜单、Editor Sandbox 和 100 单位压力场景截图；截图只作为运行证据，不替代用户人工视觉/交互验收。
+
+### 风险
+- 高密度单位的血条和精灵仍可能在人工视觉验收中显得拥挤；本轮通过真实 Infantry occupancy subcell 和压力截图验证了不使用相同坐标重叠，但未扩展为完整编队渲染工具。
+
+## 2026-08-28 - UI 视觉收口、强制攻击与 JSON 本地化
+
+### 变更
+
+- 将底部 HUD 改为小地图、矮单位信息区、2:3 头像区和右下角高 Command Card 的左右锚定布局；正式 Command Card 不绘制标题，15 个按钮继续由 `INI/UI.ini` 的固定方形 rect 同时驱动绘制和命中测试。
+- 将测试地图保持为水泥色，并把静态等距单元边线加粗为黑色；生产栏缩窄为两列产品槽，分类图标改用 RA2/YR `sidec01/tab00`–`tab03` SHP 与匹配的 `sidebar.pal`。
+- 为单位信息字段统一缩小并居中；悬浮信息层先绘制不透明底和边框，避免覆盖底层文字。
+- 新增 `ForceAttack` 命令与 K/第二行第一格入口，支持以地面点或任意单位作为强制攻击目标，并显示绿色移动线/红色攻击线及目标十字标记。
+- 新增无第三方 JSON 依赖的扁平 locale 数据库、`assets/ui/locales/en_us.json` 与 `zh_cn.json`；Rules/Terrain 中的项目 UIName 已移除，运行时显示名由 locale 覆盖。主菜单 Settings 提供语言和音量调整。
+
+### 资产与边界
+
+- 只新增了四个生产分类小 SHP 和一个 sidebar 调色板；未引入第二单位、生产实体、AI、Trigger 或资源系统。
+- 保留工作区已有的用户资料目录与 `rulesmd.ini` 未跟踪文件，不加入本轮提交。
+
+### 验证待执行
+
+- 本轮改动尚未完成 MSVC configure/build、CTest 与 EXE 截图复核；这些验证必须在提交前执行，截图只作为运行证据，不替代人工视觉验收。
+
+### 最终验证补充
+
+- 已重新执行 `tools/dev/setup.ps1`、`tools/dev/build.ps1` 和 `tools/dev/test.ps1`；CMake configure/generate、MSVC x64 compile/link 与 CTest `1/1 PASS`。
+- 已实际启动最新 `ra2yr_client.exe`；日志确认 SDL/D3D11、Rules/Art、CONS.SHP、unittem.pal、生产分类 SHP/调色板和 E2 三组 VoiceSet 均成功加载。
+- 修正 D3D viewport 使用交换链像素尺寸，补齐 DIRT 中文 locale、加强水泥格黑边、收紧生产两列布局，并将初始镜头对准现有四个演示单位。
+- 运行截图保留在被忽略的 `artifacts/round7-validation/`；截图和自动运行证据不替代用户人工视觉/交互验收。

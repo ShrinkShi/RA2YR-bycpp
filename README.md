@@ -204,7 +204,7 @@
 - `C++23 + CMake + SDL3 + Direct3D 11` 客户端工程骨架；
 - RA2/YR 红黑 CRT / 银灰金属控制台主菜单，使用独立图片按钮和 hover/pressed 状态；DTA/CnCNet 仅作组件结构参考；
 - 同一 EXE 内的 Editor/Sandbox 模式；
-- 程序化 64x64 等距草地开发地图；
+- 程序化 64x64 高对比水泥地等距开发测试地图（用于清楚观察格子和单位占位）；
 - Rules 驱动 E2/M1Carbine/SA/InvisibleLow 数据读取；
 - 项目自有最小运行素材中的真实 `CONS.SHP`、`unittem.pal` 读取与红蓝 owner remap；
 - 选择、移动、停止、Hold、巡逻、Attack Move、攻击、扣血和死亡；
@@ -235,6 +235,17 @@ P0 通过后，才会继续加入：
 通用 RTS 的第二阶段设计不会改变这个近期验收顺序：**当前仍先把真实 RA2YR 内容链路闭环，再逐步把 Gameplay Runtime 泛化。**
 
 因此当前仓库主要用于研发和兼容性验证，还不建议普通玩家作为成品游戏使用。
+
+### 第二轮开发：Editor Tools and Unit Status
+
+`feature/editor-tools-and-unit-info` 从 PR #1 合并后的 `origin/main` 建立，继续保持不修改 main、不合并 PR 的工作流。本轮只增加：
+
+- 指针、铅笔、橡皮、刷子、油漆桶、取色器六个正式 Editor 工具；
+- 数据驱动 Terrain Registry、Void cell、笔刷、四连通地形填充和 Simulation 单位放置/删除；
+- 基于真实 SHP 预览的 Unit Status ViewModel、HP 分段、击杀/经验/军阶、护甲卡、多武器卡和本地化标签；
+- `INI/Editor.ini`、`INI/Terrain.ini` 以及对应自动测试和工具窗口布局。
+
+本轮仍不实现第二个战斗单位、建筑生产、经济、AI、Trigger、多人、真实 MAP/TMP 或复杂 Editor 绘图工具。详见 [`docs/EDITOR_TOOLS_AND_UNIT_STATUS.md`](./docs/EDITOR_TOOLS_AND_UNIT_STATUS.md)。
 
 ---
 

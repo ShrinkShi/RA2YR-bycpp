@@ -23,6 +23,12 @@ The standalone commands are:
 
 Each script fails immediately if a required tool, configuration, project-owned asset, or command is missing.
 
+## Canonical local checkout
+
+PR #2 work must use the single canonical checkout `E:\时锐\RA2\RA2YR-bycpp`. Run fetch, configure, build, CTest, runtime checks and screenshot capture from that directory. Do not create another per-PR clone or worktree for ongoing fixes. Existing historical worktree directories may remain on disk for reference, but they are not active development roots.
+
+The large `agent/ra2yr-corpus-lfs` checkout remains separate from the feature branch. It is only a local source for compatibility corpus work and must never be merged, copied into the feature branch, or committed as PR assets.
+
 ## Visual Studio
 
 After setting the user-level `VCPKG_ROOT` and reopening Visual Studio, select the `windows-vcpkg` CMake configure preset. The existing build and test presets remain available for the Ninja workflow. A local `CMakeUserPresets.json` is supported and ignored, but is not required for the standard setup.
