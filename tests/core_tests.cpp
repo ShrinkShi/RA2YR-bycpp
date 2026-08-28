@@ -78,16 +78,19 @@ Inviso=yes
     assert(rules.e2().voiceSelect == "E2Select" && rules.e2().voiceMove == "E2Move" &&
         rules.e2().voiceAttack == "E2Attack");
     assert(rules.e2().primary.projectile == "InvisibleLow");
-    assert(rules.e2().name == "Conscript");
-    assert(rules.e2().secondaryName.empty());
-    assert(rules.e2().weapons.size() == 1 && rules.e2().weapons.front().uiName == "M1Carbine");
+    assert(rules.e2().uiNameKey == "cons");
+    assert(rules.e2().secondaryUiNameKey == "soviet_infantry");
+    assert(rules.e2().weapons.size() == 1 && rules.e2().weapons.front().uiNameKey == "M1");
 
     gamedata::LocalizationDatabase chinese;
     gamedata::LocalizationDatabase english;
     assert(chinese.load(contentRoot / "assets/ui/locales/zh_cn.json", error));
     assert(english.load(contentRoot / "assets/ui/locales/en_us.json", error));
-    assert(chinese.get("unit.E2.name") == "动员兵");
-    assert(english.get("unit.E2.name") == "CONSCRIPT");
+    assert(chinese.get("UIName.cons") == "动员兵");
+    assert(english.get("UIName.cons") == "CONSCRIPT");
+    assert(chinese.get("UIName.M1") == "M1卡宾枪");
+    assert(chinese.get("UIName.light_armor") == "轻型装甲");
+    assert(chinese.get("UIName.rookie") == "新兵");
     assert(chinese.get("force_attack") == "强制攻击");
     assert(chinese.get("unit_classification") == "生物单位-轻甲");
 
@@ -155,10 +158,15 @@ Inviso=yes
         const Rect producer = ui.rect("hud.production.producer." + std::to_string(index));
         assert(producer.width == producer.height);
     }
-    for (int index = 0; index < 6; ++index) {
+    for (int index = 0; index < 10; ++index) {
         const Rect product = ui.rect("hud.production.product." + std::to_string(index));
         assert(std::abs(product.width / product.height - 0.87F) < 0.01F);
     }
+    assert(ui.rect("hud.production.product.9").y > ui.rect("hud.production.product.7").y);
+    const Rect metrics = ui.childRect("hud.unitstatus", "hud.unitstatus.metrics");
+    assert(metrics.width == 700.0F && metrics.height == 28.0F);
+    assert(ui.childRect("hud.unitstatus", "hud.unitstatus.kills").y == metrics.y);
+    assert(ui.childRect("hud.unitstatus", "hud.unitstatus.veterancy").y == metrics.y);
     const Rect assetIcon = ui.relativeRect("sandbox.asset.icon.0");
     const Rect assetLabel = ui.relativeRect("sandbox.asset.label.0");
     assert(assetIcon.width > 0.0F && assetIcon.height > 0.0F);
@@ -620,7 +628,7 @@ Inviso=yes
     statusDefinition.weapons = {statusDefinition.primary, statusDefinition.primary, statusDefinition.primary};
     const client::hud::UnitStatusViewModel status = client::hud::UnitStatusViewModelBuilder::build(
         statusEntity, statusDefinition, rules, veterancy, {});
-    assert(status.displayName == "Conscript" && status.healthBand == client::hud::HealthBand::Critical);
+    assert(status.displayNameKey == "cons" && status.healthBand == client::hud::HealthBand::Critical);
     assert(status.shields.size() == 2 && status.energy == 4 && status.kills == 2);
     assert(status.weapons.size() == 3 && status.tags.size() == 3);
     assert(client::hud::UnitStatusViewModelBuilder::tooltip(status.weapons.front()).find(L"伤害：") !=

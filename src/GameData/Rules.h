@@ -13,7 +13,7 @@ namespace ra2yr::gamedata {
 
 struct WeaponDefinition {
     std::string id;
-    std::string uiName;
+    std::string uiNameKey;
     std::string icon;
     int damage = 15;
     int rateOfFire = 25;
@@ -27,7 +27,7 @@ struct WeaponDefinition {
 
 struct ArmorDefinition {
     std::string id;
-    std::string uiName;
+    std::string uiNameKey;
     std::string icon;
     int value = 0;
     std::string upgradeGroup;
@@ -37,8 +37,8 @@ struct ArmorDefinition {
 struct UnitDefinition {
     std::string id = "E2";
     std::string image = "CONS";
-    std::string name = "Conscript";
-    std::string secondaryName;
+    std::string uiNameKey = "Conscript";
+    std::string secondaryUiNameKey;
     int strength = 125;
     int speed = 4;
     int armorValue = 0;

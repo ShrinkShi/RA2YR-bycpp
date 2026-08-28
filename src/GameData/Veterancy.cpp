@@ -58,7 +58,7 @@ bool VeterancyDatabase::load(const std::filesystem::path& rulesPath, std::string
             const std::string levelSection = profileSection + "." + levelId;
             VeterancyLevelDefinition level;
             level.id = levelId;
-            level.uiName = rules.get(levelSection, "UIName", levelId);
+            level.uiNameKey = rules.get(levelSection, "UIName", levelId);
             level.requiredExperience = rules.getInt(levelSection, "RequiredExperience", 0);
             profile.levels.push_back(std::move(level));
         }

@@ -22,7 +22,7 @@ struct ShieldViewModel {
 
 struct ArmorCardViewModel {
     std::string id;
-    std::string uiName;
+    std::string uiNameKey;
     std::string icon;
     int value = 0;
     int upgradeLevel = 0;
@@ -30,7 +30,7 @@ struct ArmorCardViewModel {
 
 struct WeaponCardViewModel {
     std::string id;
-    std::string uiName;
+    std::string uiNameKey;
     std::string icon;
     int damage = 0;
     float range = 0.0F;
@@ -40,8 +40,8 @@ struct WeaponCardViewModel {
 };
 
 struct UnitStatusViewModel {
-    std::string displayName;
-    std::string secondaryName;
+    std::string displayNameKey;
+    std::string secondaryNameKey;
     int health = 0;
     int maxHealth = 0;
     HealthBand healthBand = HealthBand::Healthy;
@@ -49,7 +49,7 @@ struct UnitStatusViewModel {
     int energy = 0;
     int maxEnergy = 0;
     std::uint32_t kills = 0;
-    std::string veterancyName;
+    std::string veterancyNameKey;
     int experience = 0;
     int nextExperience = 0;
     ArmorCardViewModel armor;

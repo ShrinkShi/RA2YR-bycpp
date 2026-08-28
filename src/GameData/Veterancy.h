@@ -9,7 +9,7 @@ namespace ra2yr::gamedata {
 
 struct VeterancyLevelDefinition {
     std::string id;
-    std::string uiName;
+    std::string uiNameKey;
     int requiredExperience = 0;
 };
 

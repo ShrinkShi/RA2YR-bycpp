@@ -63,7 +63,7 @@ int parseListIndex(const std::string& key) {
 WeaponDefinition parseWeapon(const westwood::IniDocument& rules, const std::string& weaponId) {
     WeaponDefinition weapon;
     weapon.id = weaponId;
-    weapon.uiName = rules.get(weaponId, "UIName", weaponId);
+    weapon.uiNameKey = rules.get(weaponId, "UIName", weaponId);
     weapon.icon = rules.get(weaponId, "Icon");
     weapon.damage = rules.getInt(weaponId, "Damage", 15);
     weapon.rateOfFire = rules.getInt(weaponId, "ROF", 25);
@@ -81,7 +81,7 @@ ArmorDefinition parseArmor(const westwood::IniDocument& rules, const std::string
     ArmorDefinition armor;
     armor.id = armorId;
     const std::string section = "ArmorType." + armorId;
-    armor.uiName = rules.get(section, "UIName", armorId);
+    armor.uiNameKey = rules.get(section, "UIName", armorId);
     armor.icon = rules.get(section, "Icon");
     armor.value = rules.getInt(section, "Value", fallbackValue);
     armor.upgradeGroup = rules.get(section, "UpgradeGroup");
@@ -93,8 +93,8 @@ UnitDefinition parseUnit(const westwood::IniDocument& rules, const std::string& 
     UnitDefinition unit;
     unit.id = id;
     unit.image = rules.get(id, "Image", "CONS");
-    unit.name = rules.get(id, "UIName", rules.get(id, "Name", id));
-    unit.secondaryName = rules.get(id, "SecondaryUIName");
+    unit.uiNameKey = rules.get(id, "UIName", rules.get(id, "Name", id));
+    unit.secondaryUiNameKey = rules.get(id, "SecondaryUIName");
     unit.strength = rules.getInt(id, "Strength", 125);
     unit.speed = std::max(1, rules.getInt(id, "Speed", 4));
     unit.armorValue = rules.getInt(id, "ArmorValue", 0);

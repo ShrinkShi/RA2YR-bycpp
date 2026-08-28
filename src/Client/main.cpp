@@ -52,7 +52,9 @@ struct RenderScaleConfig {
 // unit scale stays independent so readability comes from the grid, not from
 // shrinking the infantry sprites. UI coordinates remain on the independent
 // 1920x1080 logical canvas.
-constexpr RenderScaleConfig kRenderScale{3.10F, 1.35F, 1.10F, 1.20F};
+// The sandbox grid is deliberately oversized for visual occupancy testing;
+// infantry visual scale remains independent so the unit proportions do not change.
+constexpr RenderScaleConfig kRenderScale{4.65F, 1.35F, 1.10F, 1.20F};
 constexpr float kTileWidth = 48.0F * kRenderScale.worldRenderScale;
 constexpr float kTileHeight = 24.0F * kRenderScale.worldRenderScale;
 constexpr float kCameraEdgeThreshold = 22.0F;
@@ -619,8 +621,8 @@ private:
             {"red", L"红方"}, {"blue", L"蓝方"}, {"place_red", L"放置红方动员兵"}, {"place_blue", L"放置蓝方动员兵"},
             {"cancel_place", L"取消放置"}, {"strategic", L"战略能力"}, {"production", L"生产栏"},
             {"building", L"建筑"}, {"defense", L"防御"}, {"infantry", L"步兵"}, {"vehicles", L"载具"},
-            {"unit_name", L"动员兵"}, {"owner", L"所有者"}, {"health", L"生命值"},
-            {"weapon", L"武器"}, {"weapon_name", L"M1卡宾枪"}, {"armor", L"护甲"}, {"armor_name", L"轻型装甲"},
+            {"owner", L"所有者"}, {"health", L"生命值"},
+            {"weapon", L"武器"}, {"armor", L"护甲"},
              {"move", L"移动"}, {"stop", L"停止"}, {"guard", L"警戒"}, {"attack", L"攻击"}, {"force_attack", L"强制攻击"},
              {"deploy", L"部署"}, {"hold", L"原地不动"}, {"patrol", L"巡逻"}, {"repair", L"维修"},
              {"waypoint", L"路径点"}, {"attack_move", L"攻击/攻击移动"},
@@ -667,8 +669,13 @@ private:
         }
     }
 
-    [[nodiscard]] std::string localizedName(std::string_view key, std::string_view fallback) const {
-        return localization_.get(key, fallback);
+    [[nodiscard]] std::string localizedUiName(std::string_view uiNameKey,
+        std::string_view fallback = {}) const {
+        if (uiNameKey.empty()) {
+            return std::string(fallback);
+        }
+        const std::string key = "UIName." + std::string(uiNameKey);
+        return localization_.get(key, fallback.empty() ? uiNameKey : fallback);
     }
 
     bool handleSettingsClick() {
@@ -824,7 +831,10 @@ private:
 
     std::wstring T(const std::string& key) const {
         const auto it = strings_.find(key);
-        return it == strings_.end() ? utf8ToWide(key) : it->second;
+        if (it != strings_.end()) {
+            return it->second;
+        }
+        return utf8ToWide(localization_.get(key, key));
     }
 
     ScreenCoord logicalMouse(float x, float y) const {
@@ -1259,7 +1269,7 @@ private:
         layout.ownerLabel = child("sandbox.owner");
         layout.redButton = child("sandbox.red");
         layout.blueButton = child("sandbox.blue");
-        for (int index = 0; index < 6; ++index) {
+        for (int index = 0; index < 10; ++index) {
             layout.toolButtons[static_cast<std::size_t>(index)] = child("sandbox.tool." + std::to_string(index));
         }
         for (int index = 0; index < 6; ++index) {
@@ -2004,11 +2014,11 @@ private:
         std::string assetName = currentAsset;
         if (editorTools_->state().category == editor::EditorAssetCategory::Terrain) {
             if (const gamedata::TerrainDefinition* definition = terrainDatabase_.find(currentAsset)) {
-                assetName = localizedName("terrain." + definition->id + ".name", definition->uiName);
+                assetName = localizedUiName(definition->uiNameKey, definition->uiNameKey);
             }
         } else if (editorTools_->state().category == editor::EditorAssetCategory::Unit) {
             if (const gamedata::UnitDefinition* definition = rules_.findUnit(currentAsset)) {
-                assetName = localizedName("unit." + definition->id + ".name", definition->name);
+                assetName = localizedUiName(definition->uiNameKey, definition->uiNameKey);
             }
         }
         const std::wstring assetText = assetName.empty() ? T("none") : utf8ToWide(assetName);
@@ -2025,7 +2035,7 @@ private:
             if (terrainCategory && index < terrainDatabase_.definitions().size()) {
                 const auto& definition = terrainDatabase_.definitions()[index];
                 active = currentAsset == definition.id;
-                label = utf8ToWide(localizedName("terrain." + definition.id + ".name", definition.uiName));
+                label = utf8ToWide(localizedUiName(definition.uiNameKey, definition.uiNameKey));
                 const auto icon = terrainPaletteImageIds_.find(definition.id);
                 if (icon != terrainPaletteImageIds_.end()) {
                     renderer_.drawImage(icon->second, layout.assetIcons[index]);
@@ -2033,7 +2043,7 @@ private:
             } else if (!terrainCategory && index < rules_.infantry().size()) {
                 const auto& definition = rules_.infantry()[index];
                 active = currentAsset == definition.id;
-                label = utf8ToWide(localizedName("unit." + definition.id + ".name", definition.name));
+                label = utf8ToWide(localizedUiName(definition.uiNameKey, definition.uiNameKey));
                 if (assetReady_) {
                     const auto* animation = art_.find(definition.image);
                     if (animation != nullptr) {
@@ -2289,31 +2299,37 @@ private:
                     *selected, *definition, rules_, veterancy_, playerUpgrades_,
                     ui_.setting("HUD.UnitStatus", "HealthyThreshold", 0.60F),
                     ui_.setting("HUD.UnitStatus", "CriticalThreshold", 0.30F));
-                status.displayName = localizedName("unit." + definition->id + ".name", status.displayName);
-                status.secondaryName = localizedName("unit." + definition->id + ".secondary", status.secondaryName);
-                status.veterancyName = localizedName("veterancy." + selected->veterancyLevel + ".name",
-                    status.veterancyName);
-                status.armor.uiName = localizedName("armor." + status.armor.id + ".name", status.armor.uiName);
-                for (auto& weapon : status.weapons) {
-                    weapon.uiName = localizedName("weapon." + weapon.id + ".name", weapon.uiName);
+                const std::string displayName = localizedUiName(status.displayNameKey, status.displayNameKey);
+                const std::string secondaryName = localizedUiName(status.secondaryNameKey,
+                    status.secondaryNameKey);
+                const std::string veterancyName = localizedUiName(status.veterancyNameKey,
+                    status.veterancyNameKey);
+                hud::ArmorCardViewModel armor = status.armor;
+                armor.uiNameKey = localizedUiName(armor.uiNameKey, armor.uiNameKey);
+                std::vector<hud::WeaponCardViewModel> weapons = status.weapons;
+                for (auto& weapon : weapons) {
+                    weapon.uiNameKey = localizedUiName(weapon.uiNameKey, weapon.uiNameKey);
                 }
                 for (std::size_t index = 0; index < status.tags.size() && index < definition->unitTags.size(); ++index) {
-                    status.tags[index] = localizedName("tag." + definition->unitTags[index] + ".name", status.tags[index]);
+                    status.tags[index] = localizedUiName(rules_.tagUiName(definition->unitTags[index]),
+                        status.tags[index]);
                 }
                 const Color healthColor = status.healthBand == hud::HealthBand::Healthy ?
                     Color{0.30F, 1.0F, 0.34F, 1.0F} : status.healthBand == hud::HealthBand::Warning ?
                     Color{1.0F, 0.84F, 0.18F, 1.0F} : Color{1.0F, 0.20F, 0.12F, 1.0F};
-                renderer_.drawText(utf8ToWide(status.displayName),
+                renderer_.drawText(utf8ToWide(displayName),
                     ui_.childRect("hud.unitstatus", "hud.unitstatus.name"), 20,
                     {1.0F, 0.82F, 0.20F, 1.0F});
-                renderer_.drawText(utf8ToWide(status.secondaryName),
+                renderer_.drawText(utf8ToWide(secondaryName),
                     ui_.childRect("hud.unitstatus", "hud.unitstatus.secondary"), 13,
                     {0.70F, 0.76F, 0.78F, 1.0F});
-                renderer_.drawText(L"击杀：" + std::to_wstring(status.kills),
-                    ui_.childRect("hud.unitstatus", "hud.unitstatus.kills"), 13,
+                const Rect metrics = ui_.childRect("hud.unitstatus", "hud.unitstatus.metrics");
+                const Rect kills = {metrics.x, metrics.y, metrics.width * 0.5F, metrics.height};
+                const Rect veterancy = {metrics.x + metrics.width * 0.5F, metrics.y,
+                    metrics.width * 0.5F, metrics.height};
+                renderer_.drawText(L"击杀：" + std::to_wstring(status.kills), kills, 13,
                     {0.92F, 0.86F, 0.36F, 1.0F});
-                renderer_.drawText(L"等级：" + utf8ToWide(status.veterancyName),
-                    ui_.childRect("hud.unitstatus", "hud.unitstatus.veterancy"), 13,
+                renderer_.drawText(L"等级：" + utf8ToWide(veterancyName), veterancy, 13,
                     {0.92F, 0.86F, 0.36F, 1.0F});
                 const std::wstring experience = status.nextExperience > 0 ?
                     L"经验：" + std::to_wstring(status.experience) + L" / " +
@@ -2350,7 +2366,7 @@ private:
                     "HUD.UnitStatus", "CardColumns", 5.0F))));
                 const Rect iconInset = ui_.relativeRect("hud.unitstatus.card.icon");
                 const Rect badgeInset = ui_.relativeRect("hud.unitstatus.card.badge");
-                const std::size_t cardCount = 1U + status.weapons.size();
+                const std::size_t cardCount = 1U + weapons.size();
                 std::wstring hoveredTooltip;
                 const auto drawStatusCard = [this, &hoveredTooltip, cardArea, cardWidth, cardHeight, cardGap,
                     columns, iconInset, badgeInset, cardCount](std::size_t index, std::string_view imageId,
@@ -2380,13 +2396,13 @@ private:
                 };
                 const auto armorImage = unitStatusArmorImageIds_.find(status.armor.id);
                 drawStatusCard(0, armorImage == unitStatusArmorImageIds_.end() ? "" : armorImage->second,
-                    hud::UnitStatusViewModelBuilder::tooltip(status.armor), status.armor.upgradeLevel);
-                for (std::size_t index = 0; index < status.weapons.size(); ++index) {
-                    const auto weaponImage = unitStatusWeaponImageIds_.find(status.weapons[index].id);
+                    hud::UnitStatusViewModelBuilder::tooltip(armor), armor.upgradeLevel);
+                for (std::size_t index = 0; index < weapons.size(); ++index) {
+                    const auto weaponImage = unitStatusWeaponImageIds_.find(weapons[index].id);
                     drawStatusCard(index + 1,
                         weaponImage == unitStatusWeaponImageIds_.end() ? "" : weaponImage->second,
-                        hud::UnitStatusViewModelBuilder::tooltip(status.weapons[index]),
-                        status.weapons[index].upgradeLevel);
+                        hud::UnitStatusViewModelBuilder::tooltip(weapons[index]),
+                        weapons[index].upgradeLevel);
                 }
                 if (!hoveredTooltip.empty()) {
                     std::size_t lineCount = 1;

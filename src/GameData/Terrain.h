@@ -11,7 +11,7 @@ namespace ra2yr::gamedata {
 
 struct TerrainDefinition {
     std::string id;
-    std::string uiName;
+    std::string uiNameKey;
     std::string icon;
     bool passable = true;
     bool buildable = true;

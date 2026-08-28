@@ -42,7 +42,7 @@ bool TerrainDatabase::load(const std::filesystem::path& path, std::string& error
         }
         TerrainDefinition terrain;
         terrain.id = id;
-        terrain.uiName = document.get(id, "UIName", id);
+        terrain.uiNameKey = document.get(id, "UIName", id);
         terrain.icon = document.get(id, "Icon");
         terrain.passable = document.getBool(id, "Passable", true);
         terrain.buildable = document.getBool(id, "Buildable", true);
