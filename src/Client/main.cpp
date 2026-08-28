@@ -48,9 +48,11 @@ struct RenderScaleConfig {
     float hudPortraitScale;
 };
 
-// Keep the world grid readable enough for the three infantry subcells. UI
-// coordinates remain on the independent 1920x1080 logical canvas.
-constexpr RenderScaleConfig kRenderScale{1.90F, 1.35F, 1.10F, 1.20F};
+// Keep one world cell visibly larger than a three-infantry formation. The
+// unit scale stays independent so readability comes from the grid, not from
+// shrinking the infantry sprites. UI coordinates remain on the independent
+// 1920x1080 logical canvas.
+constexpr RenderScaleConfig kRenderScale{2.55F, 1.35F, 1.10F, 1.20F};
 constexpr float kTileWidth = 48.0F * kRenderScale.worldRenderScale;
 constexpr float kTileHeight = 24.0F * kRenderScale.worldRenderScale;
 constexpr float kCameraEdgeThreshold = 22.0F;
@@ -62,11 +64,28 @@ struct ProductionIconAsset {
     std::string_view paletteId;
 };
 
+struct ProductionProductAsset {
+    std::string_view imageId;
+    std::string_view relativePath;
+    std::string_view paletteId;
+    float scale;
+};
+
 constexpr std::array<ProductionIconAsset, 4> kProductionIconAssets = {{
     {"ui.production.icon.building", "assets/game/ra2/production/tab00.shp", "sidebar"},
     {"ui.production.icon.defense", "assets/game/ra2/production/tab01.shp", "sidebar"},
     {"ui.production.icon.infantry", "assets/game/ra2/production/tab02.shp", "sidebar"},
     {"ui.production.icon.vehicles", "assets/game/ra2/production/tab03.shp", "sidebar"},
+}};
+
+// These are Soviet "na*" RA2 building sprites. They are only visual product
+// previews; the producer row remains disabled until Simulation exposes real
+// production entities.
+constexpr std::array<ProductionProductAsset, 4> kProductionProductAssets = {{
+    {"ui.production.product.nacnst", "assets/game/ra2/production/nacnst.shp", "unittem", 0.48F},
+    {"ui.production.product.naflak", "assets/game/ra2/production/naflak.shp", "unittem", 0.95F},
+    {"ui.production.product.nahand", "assets/game/ra2/production/nahand.shp", "unittem", 0.55F},
+    {"ui.production.product.naweap", "assets/game/ra2/production/naweap.shp", "unittem", 0.48F},
 }};
 
 enum class AppMode {
@@ -729,6 +748,15 @@ private:
                 return false;
             }
         }
+        for (const ProductionProductAsset& asset : kProductionProductAssets) {
+            westwood::ShpTsDocument product;
+            const std::filesystem::path path = contentRoot_ / asset.relativePath;
+            if (!product.load(path, error) || !renderer_.loadSpriteAsset(asset.imageId, product, error)) {
+                assetError_ = utf8ToWide(error);
+                std::cerr << "[Content][Error] " << error << '\n';
+                return false;
+            }
+        }
         unitStatusArmorImageIds_.clear();
         unitStatusArmorImageIds_.emplace("light", "ui.unitstatus.armor");
         unitStatusWeaponImageIds_.clear();
@@ -841,7 +869,7 @@ private:
 
     void updateCamera(float seconds) {
         const Rect viewport = worldViewport();
-        if (!inWorld(mouse_) || dragging_ || sandboxPaletteDragging_ ||
+        if (!inWorld(mouse_) || dragging_ || rightMouseDown_ || sandboxPaletteDragging_ ||
             (sandboxPaletteVisible_ && sandboxPaletteRect().contains(mouse_.x, mouse_.y))) {
             return;
         }
@@ -908,6 +936,15 @@ private:
                 break;
             case SDL_EVENT_MOUSE_MOTION:
                 mouse_ = logicalMouse(event.motion.x, event.motion.y);
+                if (rightMouseDown_ && mode_ == AppMode::EditorSandbox && !hasSelectedUnits()) {
+                    const ScreenCoord delta{mouse_.x - rightMousePosition_.x,
+                        mouse_.y - rightMousePosition_.y};
+                    if (std::abs(delta.x) > 0.01F || std::abs(delta.y) > 0.01F) {
+                        camera_.panScreen(delta);
+                        rightMouseDragged_ = true;
+                    }
+                    rightMousePosition_ = mouse_;
+                }
                 if (mode_ == AppMode::MainMenu) {
                     updateMenuHover();
                 }
@@ -940,6 +977,8 @@ private:
                 mouse_ = logicalMouse(event.button.x, event.button.y);
                 if (event.button.button == SDL_BUTTON_LEFT) {
                     mouseUp(true);
+                } else if (event.button.button == SDL_BUTTON_RIGHT) {
+                    mouseUp(false);
                 }
                 break;
             default:
@@ -1079,10 +1118,24 @@ private:
             return;
         }
         if (!leftButton) {
+            if (mode_ != AppMode::EditorSandbox) {
+                return;
+            }
             if (pendingAction_ != PendingAction::None) {
                 pendingAction_ = PendingAction::None;
                 toast_ = L"已取消当前命令";
                 toastTime_ = 1.5F;
+            } else if (const std::optional<WorldCoord> minimapWorld = minimapWorldAt(mouse_);
+                minimapWorld.has_value()) {
+                if (hasSelectedUnits()) {
+                    issueWorldActionAtWorld(*minimapWorld, PendingAction::None);
+                } else {
+                    camera_.worldCenter = *minimapWorld;
+                }
+            } else if (!hasSelectedUnits() && inWorld(mouse_)) {
+                rightMouseDown_ = true;
+                rightMouseDragged_ = false;
+                rightMousePosition_ = mouse_;
             } else {
                 issueWorldAction(mouse_, PendingAction::None);
             }
@@ -1111,6 +1164,7 @@ private:
 
     void mouseUp(bool leftButton) {
         if (!leftButton) {
+            rightMouseDown_ = false;
             return;
         }
         lastMouseEvent_ = "LUp";
@@ -1322,12 +1376,40 @@ private:
             "hud.strategic.collapse");
     }
 
+    IsoMapProjection minimapProjection() const {
+        return IsoMapProjection(static_cast<float>(terrainMap_.width()),
+            static_cast<float>(terrainMap_.height()), ui_.childRect("hud.minimap", "minimap.field"),
+            IsoProjection{kTileWidth, kTileHeight, {0.0F, 0.0F}});
+    }
+
+    std::optional<WorldCoord> minimapWorldAt(ScreenCoord position) const {
+        const Rect field = ui_.childRect("hud.minimap", "minimap.field");
+        if (!field.contains(position.x, position.y)) {
+            return std::nullopt;
+        }
+        const WorldCoord world = minimapProjection().unproject(position);
+        return WorldCoord{
+            std::clamp(world.x, 0.0F, static_cast<float>(std::max(0, terrainMap_.width() - 1))),
+            std::clamp(world.y, 0.0F, static_cast<float>(std::max(0, terrainMap_.height() - 1)))};
+    }
+
     bool handleEditorUiClick() {
         if (handleSandboxPaletteClick()) {
             return true;
         }
         if (strategicCollapseRect().contains(mouse_.x, mouse_.y)) {
             strategicCollapsed_ = !strategicCollapsed_;
+            audio_.play(AudioCue::UIClick);
+            return true;
+        }
+        if (const std::optional<WorldCoord> minimapWorld = minimapWorldAt(mouse_);
+            minimapWorld.has_value()) {
+            if (pendingAction_ != PendingAction::None && hasSelectedUnits()) {
+                issueWorldActionAtWorld(*minimapWorld, pendingAction_);
+                pendingAction_ = PendingAction::None;
+            } else {
+                camera_.worldCenter = *minimapWorld;
+            }
             audio_.play(AudioCue::UIClick);
             return true;
         }
@@ -1348,7 +1430,7 @@ private:
             return true;
         }
         const Rect card = ui_.rect("hud.command_card");
-        if (card.contains(mouse_.x, mouse_.y)) {
+        if (hasSelectedUnits() && card.contains(mouse_.x, mouse_.y)) {
             for (int slot = 0; slot < 15; ++slot) {
                 if (!ui_.childRect("hud.command_card", "hud.command_card.slot." + std::to_string(slot))
                         .contains(mouse_.x, mouse_.y)) {
@@ -1383,8 +1465,14 @@ private:
         if (!inWorld(position)) {
             return;
         }
+        issueWorldActionAtWorld(screenToWorld(position), actionFromMouse, unitAt(position));
+    }
+
+    void issueWorldActionAtWorld(WorldCoord targetWorld, PendingAction actionFromMouse,
+        std::uint32_t target = 0) {
         const PendingAction action = actionFromMouse == PendingAction::None ? pendingAction_ : actionFromMouse;
-        const GridCoord destination = screenToGrid(position);
+        const GridCoord destination{static_cast<int>(std::lround(targetWorld.x)),
+            static_cast<int>(std::lround(targetWorld.y))};
         const bool hasSelection = hasSelectedUnits();
         if (action == PendingAction::Move) {
             if (hasSelection) {
@@ -1397,7 +1485,9 @@ private:
                 audio_.play(AudioCue::VoiceMoveAcknowledgement);
             }
         } else if (action == PendingAction::AttackMove) {
-            const std::uint32_t target = unitAt(position);
+            if (target == 0) {
+                target = unitAtWorld(targetWorld);
+            }
             if (hasSelection && isEnemyTarget(target)) {
                 simulation_->issueAttack(target);
                 audio_.play(AudioCue::VoiceAttackAcknowledgement);
@@ -1406,37 +1496,44 @@ private:
                 audio_.play(AudioCue::VoiceAttackAcknowledgement);
             }
         } else if (action == PendingAction::Attack) {
-            const std::uint32_t target = unitAt(position);
+            if (target == 0) {
+                target = unitAtWorld(targetWorld);
+            }
             if (hasSelection && isEnemyTarget(target)) {
                 simulation_->issueAttack(target);
                 audio_.play(AudioCue::VoiceAttackAcknowledgement);
             }
         } else if (action == PendingAction::ForceAttack) {
             if (hasSelection) {
-                simulation_->issueForceAttack(destination, unitAt(position));
+                if (target == 0) {
+                    target = unitAtWorld(targetWorld);
+                }
+                simulation_->issueForceAttack(destination, target);
                 audio_.play(AudioCue::VoiceAttackAcknowledgement);
-                targetIndicator_ = screenToWorld(position);
+                targetIndicator_ = targetWorld;
                 targetIndicatorColor_ = {1.0F, 0.12F, 0.08F, 1.0F};
                 targetIndicatorTime_ = 1.0F;
             }
         } else {
-            const std::uint32_t target = unitAt(position);
+            if (target == 0) {
+                target = unitAtWorld(targetWorld);
+            }
             if (hasSelection && isEnemyTarget(target)) {
                 simulation_->issueAttack(target);
                 audio_.play(AudioCue::VoiceAttackAcknowledgement);
-                targetIndicator_ = screenToWorld(position);
+                targetIndicator_ = targetWorld;
                 targetIndicatorColor_ = {1.0F, 0.12F, 0.08F, 1.0F};
                 targetIndicatorTime_ = 1.0F;
             } else if (hasSelection) {
                 simulation_->issueMove(destination);
                 audio_.play(AudioCue::VoiceMoveAcknowledgement);
-                targetIndicator_ = screenToWorld(position);
+                targetIndicator_ = targetWorld;
                 targetIndicatorColor_ = {0.18F, 1.0F, 0.34F, 1.0F};
                 targetIndicatorTime_ = 1.0F;
             }
         }
         if (action == PendingAction::Move || action == PendingAction::Patrol || action == PendingAction::AttackMove) {
-            targetIndicator_ = screenToWorld(position);
+            targetIndicator_ = targetWorld;
             targetIndicatorColor_ = action == PendingAction::AttackMove ?
                 Color{1.0F, 0.12F, 0.08F, 1.0F} : Color{0.18F, 1.0F, 0.34F, 1.0F};
             targetIndicatorTime_ = 1.0F;
@@ -1520,6 +1617,23 @@ private:
                     closest = candidate;
                     result = entity.id;
                 }
+            }
+        }
+        return result;
+    }
+
+    std::uint32_t unitAtWorld(WorldCoord position) const {
+        std::uint32_t result = 0;
+        float closest = std::numeric_limits<float>::max();
+        for (const auto& entity : simulation_->entities()) {
+            if (entity.health <= 0) {
+                continue;
+            }
+            const float candidate = distance(entity.position, position);
+            const float hitRadius = std::max(0.55F, entity.selectionRadius * 1.8F);
+            if (candidate <= hitRadius && candidate < closest) {
+                closest = candidate;
+                result = entity.id;
             }
         }
         return result;
@@ -1749,17 +1863,17 @@ private:
 
     void drawHudPanel(Rect panel, const std::string& backgroundAsset, const std::wstring& title) {
         renderer_.drawImage(backgroundAsset, panel);
-        renderer_.drawText(title, {panel.x + 12.0F, panel.y + 7.0F, panel.width - 24.0F, 26.0F}, 16,
-            {1.0F, 0.82F, 0.20F, 1.0F});
+        if (!title.empty()) {
+            renderer_.drawText(title, {panel.x + 12.0F, panel.y + 7.0F, panel.width - 24.0F, 26.0F}, 16,
+                {1.0F, 0.82F, 0.20F, 1.0F});
+        }
     }
 
     void renderMiniMap(Rect panel) {
         drawHudPanel(panel, "ui.hud.minimap.background", T("minimap"));
         const Rect field = ui_.childRect("hud.minimap", "minimap.field");
         renderer_.drawRect(field, {0.025F, 0.10F, 0.065F, 1.0F});
-        const IsoMapProjection mapProjection(static_cast<float>(terrainMap_.width()),
-            static_cast<float>(terrainMap_.height()), field,
-            IsoProjection{kTileWidth, kTileHeight, {0.0F, 0.0F}});
+        const IsoMapProjection mapProjection = minimapProjection();
         for (int y = 0; y < terrainMap_.height(); ++y) {
             for (int x = 0; x < terrainMap_.width(); ++x) {
                 if (terrainMap_.cell({x, y}).exists) {
@@ -1806,6 +1920,10 @@ private:
             renderer_.drawLine(minimapCorners[index],
                 minimapCorners[(index + 1U) % minimapCorners.size()],
                 {1.0F, 0.84F, 0.25F, 0.90F}, 2.0F);
+        }
+        if (targetIndicatorTime_ > 0.0F && targetIndicator_.has_value()) {
+            const ScreenCoord target = mapProjection.project(*targetIndicator_);
+            renderer_.drawCircle(target, 7.0F, targetIndicatorColor_, 2.0F, false);
         }
     }
 
@@ -2016,8 +2134,35 @@ private:
         renderer_.drawStaticTerrain();
         renderer_.drawBorder(world, {0.65F, 0.48F, 0.18F, 1.0F}, 3.0F);
 
+        if (inWorld(mouse_)) {
+            const GridCoord hoveredCell = screenToGrid(mouse_);
+            if (terrainMap_.contains(hoveredCell) && terrainMap_.cell(hoveredCell).exists) {
+                renderer_.drawDiamond(gridToScreen({static_cast<float>(hoveredCell.x),
+                    static_cast<float>(hoveredCell.y)}), kTileWidth * camera_.zoom,
+                    kTileHeight * camera_.zoom, {0.98F, 0.78F, 0.16F, 0.16F},
+                    {1.0F, 0.88F, 0.30F, 0.95F});
+            }
+        }
+
         const std::uint32_t hoveredUnit = !dragging_ && inWorld(mouse_) ? unitAt(mouse_) : 0;
+        std::vector<const simulation::Entity*> renderOrder;
+        renderOrder.reserve(simulation_->entities().size());
         for (const auto& entity : simulation_->entities()) {
+            if (entity.health > 0) {
+                renderOrder.push_back(&entity);
+            }
+        }
+        std::sort(renderOrder.begin(), renderOrder.end(), [](const auto* first, const auto* second) {
+            if (first->position.y != second->position.y) {
+                return first->position.y < second->position.y;
+            }
+            if (first->position.x != second->position.x) {
+                return first->position.x < second->position.x;
+            }
+            return first->id < second->id;
+        });
+        for (const auto* entityPointer : renderOrder) {
+            const auto& entity = *entityPointer;
             if (entity.health <= 0) {
                 continue;
             }
@@ -2103,9 +2248,14 @@ private:
             renderer_.drawImage("ui.hud.tab", producer, {0.55F, 0.55F, 0.58F, 1.0F});
             renderer_.drawText(L"--", producer, 18, {0.42F, 0.44F, 0.48F, 1.0F});
         }
-        for (int index = 0; index < 12; ++index) {
+        for (int index = 0; index < 6; ++index) {
             const Rect product = ui_.rect("hud.production.product." + std::to_string(index));
             renderer_.drawImage("ui.hud.button", product, {0.42F, 0.44F, 0.46F, 1.0F});
+            if (index < static_cast<int>(kProductionProductAssets.size())) {
+                const ProductionProductAsset& asset = kProductionProductAssets[static_cast<std::size_t>(index)];
+                renderer_.drawSprite(asset.imageId, asset.paletteId, 0, Owner::Red,
+                    {product.x + product.width * 0.5F, product.y + product.height * 0.84F}, asset.scale);
+            }
         }
 
         const Rect miniMap = ui_.rect("hud.minimap");
@@ -2113,35 +2263,29 @@ private:
         const Rect portrait = ui_.rect("hud.portrait");
         renderMiniMap(miniMap);
         renderer_.drawImage("ui.hud.unitstatus.background", unitStatus);
-        drawHudPanel(portrait, "ui.hud.portrait.background", T("portrait"));
         const auto selected = selectedEntity();
-        const auto preview = previewEntity();
-        const Rect modelViewport = ui_.childRect("hud.unitstatus", "hud.unitstatus.preview");
-        const Rect portraitViewport = ui_.rect("hud.portrait.viewport");
-        renderer_.drawRect(modelViewport, {0.005F, 0.008F, 0.012F, 1.0F});
-        renderer_.drawRect(portraitViewport, {0.005F, 0.008F, 0.012F, 1.0F});
-        if (preview != nullptr && assetReady_) {
+        drawHudPanel(portrait, "ui.hud.portrait.background",
+            selected == nullptr ? L"" : T("portrait"));
+        if (selected != nullptr && assetReady_) {
             const std::size_t frame = static_cast<std::size_t>(art_.frameIndex(rules_.e2().image,
-                animationSequence(preview->animationState), preview->animationFrame, preview->facing));
-            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner,
+                animationSequence(selected->animationState), selected->animationFrame, selected->facing));
+            const Rect modelViewport = ui_.childRect("hud.unitstatus", "hud.unitstatus.preview");
+            const Rect portraitViewport = ui_.rect("hud.portrait.viewport");
+            renderer_.drawRect(modelViewport, {0.005F, 0.008F, 0.012F, 1.0F});
+            renderer_.drawRect(portraitViewport, {0.005F, 0.008F, 0.012F, 1.0F});
+            renderer_.drawSprite(rules_.e2().image, "unittem", frame, selected->owner,
                 {modelViewport.x + modelViewport.width * 0.5F,
                     modelViewport.y + modelViewport.height * 0.55F},
                 kRenderScale.hudModelScale);
-            renderer_.drawSprite(rules_.e2().image, "unittem", frame, preview->owner,
+            renderer_.drawSprite(rules_.e2().image, "unittem", frame, selected->owner,
                 {portraitViewport.x + portraitViewport.width * 0.5F,
                     portraitViewport.y + portraitViewport.height * 0.58F},
                 kRenderScale.hudPortraitScale);
-        } else {
-            renderer_.drawText(L"--", modelViewport, 28, {0.42F, 0.44F, 0.48F, 1.0F});
-            renderer_.drawText(L"--", portraitViewport, 28, {0.42F, 0.44F, 0.48F, 1.0F});
         }
-        if (selected == nullptr) {
-            renderer_.drawText(L"未选择单位", ui_.childRect("hud.unitstatus", "hud.unitstatus.name"), 22,
-                {1.0F, 0.82F, 0.20F, 1.0F}, false);
-        } else {
+        if (selected != nullptr) {
             const gamedata::UnitDefinition* definition = rules_.findUnit(selected->definitionId);
             if (definition != nullptr) {
-            hud::UnitStatusViewModel status = hud::UnitStatusViewModelBuilder::build(
+                hud::UnitStatusViewModel status = hud::UnitStatusViewModelBuilder::build(
                     *selected, *definition, rules_, veterancy_, playerUpgrades_,
                     ui_.setting("HUD.UnitStatus", "HealthyThreshold", 0.60F),
                     ui_.setting("HUD.UnitStatus", "CriticalThreshold", 0.30F));
@@ -2212,13 +2356,19 @@ private:
                     "HUD.UnitStatus", "CardColumns", 5.0F))));
                 const Rect iconInset = ui_.relativeRect("hud.unitstatus.card.icon");
                 const Rect badgeInset = ui_.relativeRect("hud.unitstatus.card.badge");
+                const std::size_t cardCount = 1U + status.weapons.size();
                 std::wstring hoveredTooltip;
                 const auto drawStatusCard = [this, &hoveredTooltip, cardArea, cardWidth, cardHeight, cardGap,
-                    columns, iconInset, badgeInset](std::size_t index, std::string_view imageId,
+                    columns, iconInset, badgeInset, cardCount](std::size_t index, std::string_view imageId,
                     const std::wstring& tooltip, int upgradeLevel) {
                     const int column = static_cast<int>(index % static_cast<std::size_t>(columns));
                     const int row = static_cast<int>(index / static_cast<std::size_t>(columns));
-                    const Rect card{cardArea.x + static_cast<float>(column) * (cardWidth + cardGap),
+                    const std::size_t rowStart = static_cast<std::size_t>(row) * static_cast<std::size_t>(columns);
+                    const std::size_t rowCount = std::min(static_cast<std::size_t>(columns), cardCount - rowStart);
+                    const float rowWidth = static_cast<float>(rowCount) * cardWidth +
+                        static_cast<float>(rowCount > 0 ? rowCount - 1U : 0U) * cardGap;
+                    const float rowOrigin = cardArea.x + (cardArea.width - rowWidth) * 0.5F;
+                    const Rect card{rowOrigin + static_cast<float>(column) * (cardWidth + cardGap),
                         cardArea.y + static_cast<float>(row) * (cardHeight + cardGap), cardWidth, cardHeight};
                     renderer_.drawImage("ui.unitstatus.card", card);
                     if (!imageId.empty()) {
@@ -2261,28 +2411,31 @@ private:
             }
         }
 
-        const Rect card = ui_.rect("hud.command_card");
-        // The formal command-card skin has no title strip; all fifteen cells
-        // are square rects from UI.ini and use the same data for hit testing.
-        renderer_.drawImage("ui.hud.commandcard.background", card);
-        if (pendingAction_ != PendingAction::None) {
-            renderer_.drawText(T("target") + L"：" + pendingActionLabel(), ui_.childRect("hud.command_card", "hud.command_card.target"), 12,
-                {1.0F, 0.34F, 0.18F, 1.0F}, false);
-        }
-        const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "force_attack", "", "", "", "", "", "", "", "", ""};
-        for (int slot = 0; slot < 15; ++slot) {
-            const Rect button = ui_.childRect("hud.command_card",
-                "hud.command_card.slot." + std::to_string(slot));
-            const bool hot = button.contains(mouse_.x, mouse_.y);
-            const bool active = (slot == 0 && pendingAction_ == PendingAction::Move) ||
-                (slot == 3 && pendingAction_ == PendingAction::Patrol) ||
-                (slot == 4 && pendingAction_ == PendingAction::AttackMove) ||
-                (slot == 5 && pendingAction_ == PendingAction::ForceAttack);
-            renderer_.drawImage(hot || active ? "ui.hud.button_hover" : "ui.hud.button", button,
-                active ? Color{1.0F, 0.78F, 0.38F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
-            if (!commandKeys[slot].empty()) {
-                const int fontSize = slot == 4 ? 9 : 13;
-                renderer_.drawText(T(commandKeys[slot]), button, fontSize, {1.0F, 0.84F, 0.26F, 1.0F});
+        if (selected != nullptr) {
+            const Rect card = ui_.rect("hud.command_card");
+            // The formal command-card skin has no title strip; all fifteen cells
+            // are square rects from UI.ini and use the same data for hit testing.
+            renderer_.drawImage("ui.hud.commandcard.background", card);
+            if (pendingAction_ != PendingAction::None) {
+                renderer_.drawText(T("target") + L"：" + pendingActionLabel(),
+                    ui_.childRect("hud.command_card", "hud.command_card.target"), 12,
+                    {1.0F, 0.34F, 0.18F, 1.0F}, false);
+            }
+            const std::string commandKeys[] = {"move", "stop", "hold", "patrol", "attack_move", "force_attack", "", "", "", "", "", "", "", "", ""};
+            for (int slot = 0; slot < 15; ++slot) {
+                const Rect button = ui_.childRect("hud.command_card",
+                    "hud.command_card.slot." + std::to_string(slot));
+                const bool hot = button.contains(mouse_.x, mouse_.y);
+                const bool active = (slot == 0 && pendingAction_ == PendingAction::Move) ||
+                    (slot == 3 && pendingAction_ == PendingAction::Patrol) ||
+                    (slot == 4 && pendingAction_ == PendingAction::AttackMove) ||
+                    (slot == 5 && pendingAction_ == PendingAction::ForceAttack);
+                renderer_.drawImage(hot || active ? "ui.hud.button_hover" : "ui.hud.button", button,
+                    active ? Color{1.0F, 0.78F, 0.38F, 1.0F} : Color{1.0F, 1.0F, 1.0F, 1.0F});
+                if (!commandKeys[slot].empty()) {
+                    const int fontSize = slot == 4 ? 9 : slot == 5 ? 10 : 13;
+                    renderer_.drawText(T(commandKeys[slot]), button, fontSize, {1.0F, 0.84F, 0.26F, 1.0F});
+                }
             }
         }
 
@@ -2354,6 +2507,8 @@ private:
     bool placing_ = false;
     bool editorStroke_ = false;
     bool leftMouseDown_ = false;
+    bool rightMouseDown_ = false;
+    bool rightMouseDragged_ = false;
     bool dragging_ = false;
     bool strategicCollapsed_ = false;
     bool sandboxPaletteVisible_ = true;
@@ -2374,6 +2529,7 @@ private:
     ScreenCoord mouse_{};
     ScreenCoord dragStart_{};
     ScreenCoord dragEnd_{};
+    ScreenCoord rightMousePosition_{};
     ScreenCoord sandboxPalettePosition_{};
     ScreenCoord sandboxPaletteDragOffset_{};
     std::string lastMouseEvent_ = "NONE";

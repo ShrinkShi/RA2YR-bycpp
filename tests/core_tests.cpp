@@ -120,6 +120,7 @@ Inviso=yes
     assert(ui.rect("hud.unitstatus").width > 600.0F);
     assert(ui.childRect("hud.unitstatus", "hud.unitstatus.preview").width > 0.0F);
     assert(ui.relativeRect("hud.unitstatus.card.badge").width > 0.0F);
+    assert(ui.imagePath("ui.hud.unitstatus.background", contentRoot).filename() == "unitstatus_clean.png");
     const Rect commandPanel = ui.rect("hud.command_card");
     const Rect minimapPanel = ui.rect("hud.minimap");
     const Rect minimapUiField = ui.childRect("hud.minimap", "minimap.field");
@@ -128,6 +129,9 @@ Inviso=yes
     assert(commandPanel.height > ui.rect("hud.unitstatus").height);
     assert(commandPanel.height == minimapPanel.height);
     assert(minimapUiField.width == minimapUiField.height);
+    assert(minimapPanel.x + minimapPanel.width == ui.rect("hud.unitstatus").x);
+    assert(ui.rect("hud.unitstatus").x + ui.rect("hud.unitstatus").width == portraitPanel.x);
+    assert(portraitPanel.x + portraitPanel.width == commandPanel.x);
     assert(std::abs(portraitPanel.width / portraitPanel.height - (2.0F / 3.0F)) < 0.001F);
     assert(std::abs(portraitViewport.width / portraitViewport.height - (2.0F / 3.0F)) < 0.001F);
     assert(ui.setting("HUD.UnitStatus", "CardWidth", 0.0F) ==
@@ -139,6 +143,18 @@ Inviso=yes
         assert(commandSlot.x >= commandPanel.x && commandSlot.y >= commandPanel.y);
         assert(commandSlot.x + commandSlot.width <= commandPanel.x + commandPanel.width);
         assert(commandSlot.y + commandSlot.height <= commandPanel.y + commandPanel.height);
+    }
+    for (int index = 0; index < 4; ++index) {
+        const Rect tab = ui.rect("hud.production.tab." + std::to_string(index));
+        assert(tab.width == tab.height);
+    }
+    for (int index = 0; index < 3; ++index) {
+        const Rect producer = ui.rect("hud.production.producer." + std::to_string(index));
+        assert(producer.width == producer.height);
+    }
+    for (int index = 0; index < 6; ++index) {
+        const Rect product = ui.rect("hud.production.product." + std::to_string(index));
+        assert(std::abs(product.width / product.height - 0.87F) < 0.01F);
     }
     const Rect assetIcon = ui.relativeRect("sandbox.asset.icon.0");
     const Rect assetLabel = ui.relativeRect("sandbox.asset.label.0");
@@ -478,6 +494,11 @@ Inviso=yes
     assert(std::abs(minimapLeft.y - minimapCenter.y) < 0.001F);
     assert(std::abs(minimapRight.y - minimapCenter.y) < 0.001F);
     assert(minimapRight.x > minimapLeft.x && minimapBottom.y > minimapTop.y);
+    const WorldCoord minimapRoundTripSource{19.5F, 27.25F};
+    const WorldCoord minimapRoundTrip = minimapProjection.unproject(
+        minimapProjection.project(minimapRoundTripSource));
+    assert(std::abs(minimapRoundTrip.x - minimapRoundTripSource.x) < 0.001F);
+    assert(std::abs(minimapRoundTrip.y - minimapRoundTripSource.y) < 0.001F);
 
     const auto minimapViewport = [&minimapProjection](const IsometricCamera& camera) {
         constexpr Rect viewport{100.0F, 50.0F, 1390.0F, 780.0F};

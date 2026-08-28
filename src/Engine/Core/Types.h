@@ -179,6 +179,15 @@ struct IsoMapProjection {
         return {field.x + field.width * 0.5F + (source.x - sourceCenterX) * scale,
             field.y + field.height * 0.5F + (source.y - sourceCenterY) * scale};
     }
+
+    [[nodiscard]] WorldCoord unproject(ScreenCoord screen) const {
+        const float sourceCenterX = (minX + maxX) * 0.5F;
+        const float sourceCenterY = (minY + maxY) * 0.5F;
+        const ScreenCoord source{
+            sourceCenterX + (screen.x - (field.x + field.width * 0.5F)) / scale,
+            sourceCenterY + (screen.y - (field.y + field.height * 0.5F)) / scale};
+        return basis.toWorldVector(source);
+    }
 };
 
 enum class Owner : std::uint8_t {
